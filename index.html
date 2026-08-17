@@ -1,0 +1,2074 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Controle de Entrada de Veículos — Perpec Oilfield Supply</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+<!-- Logo da Perpec em base64. Sem este arquivo o PDF sai sem logo quando a
+     página é aberta direto do disco (file://). Ver cabeçalho de logo.js. -->
+<script src="logo.js"></script>
+
+<!-- ============================================================= -->
+<!-- ===== CONFIG (ponto único de manutenção) ==================== -->
+<!-- ============================================================= -->
+<script>
+  const CONFIG = {
+    // Referência do documento (cabeçalho da tela e rodapé do PDF)
+    DOC_REF: "FP-ADM-0002 RevForm.01",
+    LOGO_URL: "PERPEC - LOGO PRINCIPAL.png",
+
+    // ---- Numeração dos registros ----
+    // Formato final: PREFIXO-ANO-0001 (sequência reinicia a cada ano).
+    PREFIXO_REGISTRO: "PORT",
+
+    // ---- Banco de dados local (navegador) ----
+    // Tudo fica no localStorage deste navegador/perfil. Não há servidor.
+    // Use "Backup" no Histórico para levar os dados a outra máquina.
+    DB_KEY: "perpec.portaria.v1",
+
+    // ---- Semáforo de permanência (veículo ainda dentro da unidade) ----
+    // AZUL até ALERTA_H · AMARELO a partir de ALERTA_H · VERMELHO a partir de CRITICO_H
+    ALERTA_PERMANENCIA_H: 12,
+    CRITICO_PERMANENCIA_H: 24,
+
+    // ---- Tolerâncias de data/hora ----
+    TOLERANCIA_FUTURO_MIN: 5,   // minutos aceitos "no futuro" (relógio do PC)
+    CONFIRMA_RETROATIVO_H: 24,  // pede confirmação se a entrada for mais antiga
+
+    // ---- Listas de apoio ----
+    // Escala 12x12. Ajuste os horários aqui se a escala da portaria mudar.
+    TURNOS: ["Turno Diurno (07h–19h)", "Turno Noturno (19h–07h)"],
+    SETORES: [
+      "Diretoria", "Administrativo / Financeiro", "Comercial", "Engenharia",
+      "Qualidade (SGQ)", "Suprimentos / Compras", "Produção / Oficina",
+      "Almoxarifado", "Logística / Expedição", "Manutenção",
+      "SMS / Segurança do Trabalho", "Recursos Humanos", "TI", "Outro"
+    ],
+
+    // Texto do termo confirmado pelo porteiro na ENTRADA
+    TERMO_ENTRADA:
+      "Confirmo que vi o documento da pessoa, conferi a placa do carro, falei com o setor que " +
+      "autorizou a entrada e que tudo o que está escrito acima está certo.",
+
+    // Texto do termo confirmado pelo porteiro na SAÍDA
+    TERMO_SAIDA:
+      "Confirmo que acompanhei a saída da pessoa e do carro, que não há material ou equipamento " +
+      "saindo sem autorização e que o horário de saída está certo."
+  };
+</script>
+
+<style>
+/* ====== SISTEMA DE DESIGN (base: base.html) ====== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --red:#C0392B;--red2:#961c13;--dark:#1A1210;
+  --bg:#F2F1ED;--surface:#FFFFFF;--surface2:#F8F7F5;
+  --border:#E0DBD5;--border2:#C5BDB5;
+  --text:#18171A;--muted:#6A6760;
+  --accent:#C0392B;--accent-lt:#FDF0EF;
+  --radius:8px;--radius-lg:12px;
+  --green:#2E7D32;--green-bg:#EAF6EB;--green-bd:#A7D7AA;
+  --yellow:#B7791F;--yellow-bg:#FEF7E6;--yellow-bd:#F0D98A;
+  --blue:#3D5AC0;--blue-bg:#EEF2FF;--blue-bd:#B9C5EC;
+
+  /* ---- SEMÁFORO DE SITUAÇÃO (uma cor = um significado, em todo o sistema) ----
+     AZUL     dentro da unidade, tudo normal
+     AMARELO  dentro há muito tempo — verificar
+     VERMELHO dentro há tempo demais — providência urgente
+     VERDE    já saiu, registro concluído                                  */
+  --st-in:#3D5AC0;   --st-in-bg:#EEF2FF;   --st-in-bd:#B9C5EC;
+  --st-warn:#B7791F; --st-warn-bg:#FEF7E6; --st-warn-bd:#F0D98A;
+  --st-late:#C0392B; --st-late-bg:#FDECEA; --st-late-bd:#E8B8B0;
+  --st-out:#2E7D32;  --st-out-bg:#EAF6EB;  --st-out-bd:#A7D7AA;
+}
+body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+.site-header{background:#fff;border-bottom:3px solid var(--red);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.header-inner{max-width:1080px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:.7rem 1.5rem}
+.header-logo img{height:44px;width:auto;display:block}
+.header-right{text-align:right;margin-left:auto}
+.header-right .title{font-size:15px;font-weight:700;color:var(--dark)}
+.header-right .sub{font-size:11px;color:var(--muted);margin-top:2px}
+.doc-strip{background:var(--dark);padding:.55rem 1.5rem}
+.doc-strip-inner{max-width:1080px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.4rem}
+.doc-code-label{font-size:11px;color:#A09090;letter-spacing:.05em;text-transform:uppercase;margin-right:4px}
+.doc-code-val{font-family:"Courier New",monospace;font-size:14px;font-weight:700;color:#fff;letter-spacing:.1em}
+.doc-meta{font-size:12px;color:#D8CCCC;font-family:"Courier New",monospace;font-weight:700}
+.sticky-top{position:sticky;top:0;z-index:100}
+.wrap{max-width:1080px;margin:0 auto;padding:1.5rem 1rem 5rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:1.1rem;box-shadow:0 1px 3px rgba(0,0,0,.05);position:relative}
+.card-head{background:var(--dark);padding:.75rem 1.3rem;display:flex;align-items:center;gap:10px;border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+.card-head h2{font-size:13px;font-weight:700;letter-spacing:.04em;color:#F0E6E4}
+.card-head svg{width:15px;height:15px;stroke:#E08070;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+/* Numeral do passo — orienta a ordem de preenchimento sem depender de leitura */
+.step{width:26px;height:26px;border-radius:50%;background:var(--red);color:#fff;font-size:14px;font-weight:800;
+      display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.card-body{padding:1.25rem 1.3rem}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.full{grid-column:1/-1}
+@media(max-width:700px){.g2{grid-template-columns:1fr}.full{grid-column:1}}
+
+/* Campos maiores: uso em pé, às vezes em tablet/celular. 16px evita zoom no iOS. */
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:13px;font-weight:700;color:var(--text);letter-spacing:.01em}
+.req{color:var(--red);margin-left:2px}
+.field input,.field textarea,.field select{border:1.5px solid var(--border2);border-radius:var(--radius);padding:12px 13px;font-size:16px;font-family:inherit;color:var(--text);background:var(--surface);transition:border-color .14s,box-shadow .14s;width:100%}
+.field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--red);box-shadow:0 0 0 3px rgba(192,57,43,.14)}
+.field input[readonly]{background:var(--surface2);color:var(--muted);cursor:default;border-style:dashed}
+.field textarea{resize:vertical;min-height:84px}
+.field.err input,.field.err select,.field.err textarea{border-color:var(--red);background:var(--accent-lt)}
+.field .hint{font-size:12px;color:var(--muted)}
+.field .msg{display:none;font-size:12.5px;font-weight:700;color:var(--red)}
+.field.err .msg{display:block}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:12px 18px;min-height:46px;border:none;border-radius:var(--radius);font-size:14.5px;font-weight:700;cursor:pointer;transition:all .13s;font-family:inherit;white-space:nowrap}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.btn:active{transform:translateY(0)}
+.btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.btn-dark{background:var(--dark);color:#fff}.btn-dark:hover{background:#2D1F1A}
+.btn-red{background:var(--red);color:#fff}.btn-red:hover{background:var(--red2)}
+.btn-green{background:var(--st-out);color:#fff}.btn-green:hover{background:#25682a}
+.btn-outline{background:var(--surface);color:var(--text);border:1.5px solid var(--border2)}
+.btn-outline:hover{background:var(--surface2);border-color:#9A9087}
+.btn-sm{padding:8px 13px;min-height:38px;font-size:13px}
+.btn-xl{padding:16px 24px;min-height:58px;font-size:16.5px;width:100%}
+.btn:disabled{background:var(--border2) !important;cursor:not-allowed;color:var(--muted);transform:none !important;box-shadow:none !important}
+.act-bar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.1rem 1.3rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.act-group{display:flex;gap:9px;flex-wrap:wrap}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--dark);color:#fff;border-radius:var(--radius-lg);padding:14px 22px;font-size:14.5px;font-weight:700;pointer-events:none;opacity:0;transition:opacity .2s,transform .2s;z-index:99999;max-width:90vw;text-align:center;white-space:pre-line;box-shadow:0 8px 28px rgba(0,0,0,.3)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.success{background:#155724}.toast.error{background:var(--red)}
+.count-pill{display:inline-flex;align-items:center;background:rgba(255,255,255,.14);color:#F0E6E4;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:700;margin-left:auto}
+.page-footer{text-align:center;font-size:12px;color:#aaa;margin-top:32px;padding-bottom:24px}
+.empty-state{text-align:center;padding:2.6rem 1rem;color:var(--muted);font-size:14px;border:2px dashed var(--border2);border-radius:var(--radius-lg);background:var(--surface)}
+@media(max-width:768px){.act-bar{flex-direction:column;align-items:stretch}.act-group{justify-content:stretch}.act-bar .btn{width:100%}}
+@media(max-width:480px){.header-logo img{height:36px}.card-body{padding:1rem}}
+
+/* ====== FAIXA DE TURNO ====== */
+.turno-strip{background:var(--surface);border-bottom:1px solid var(--border);box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.turno-strip.off{background:var(--st-late-bg);border-bottom-color:var(--st-late-bd)}
+.turno-inner{max-width:1080px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:.55rem 1.5rem;flex-wrap:wrap}
+.turno-dot{width:12px;height:12px;border-radius:50%;background:var(--st-late);flex-shrink:0;box-shadow:0 0 0 4px var(--st-late-bg)}
+.turno-dot.on{background:var(--st-out);box-shadow:0 0 0 4px var(--st-out-bg)}
+.turno-txt{font-size:13.5px;color:var(--text);font-weight:700}
+.turno-txt .sub{font-weight:400;color:var(--muted)}
+.turno-inner .assin-mini{height:26px;width:auto;max-width:110px;object-fit:contain;background:#fff;border:1px solid var(--border);border-radius:5px;padding:1px 4px}
+.turno-inner .btn{margin-left:auto}
+@media(max-width:600px){.turno-inner{padding:.55rem 1rem}.turno-inner .btn{margin-left:0;width:100%}}
+
+/* ====== ABAS ====== */
+.tabs{background:var(--surface);border-bottom:1px solid var(--border);box-shadow:0 2px 6px rgba(0,0,0,.05);overflow-x:auto}
+.tabs-inner{max-width:1080px;margin:0 auto;display:flex;gap:2px;padding:0 1.2rem}
+.tab{border:none;background:none;font-family:inherit;font-size:14px;font-weight:700;color:var(--muted);padding:14px 16px;cursor:pointer;border-bottom:4px solid transparent;transition:color .13s,border-color .13s;white-space:nowrap;display:flex;align-items:center;gap:8px}
+.tab:hover{color:var(--text)}
+.tab.sel{color:var(--red);border-bottom-color:var(--red)}
+.tab .n{font-size:12px;font-weight:800;border-radius:20px;padding:2px 9px;min-width:24px;text-align:center;
+        background:var(--st-in-bg);border:1px solid var(--st-in-bd);color:var(--st-in)}
+.tab .n.zero{background:var(--surface2);border-color:var(--border);color:var(--muted)}
+.tab .n.warn{background:var(--st-warn-bg);border-color:var(--st-warn-bd);color:var(--st-warn)}
+.tab .n.late{background:var(--st-late-bg);border-color:var(--st-late-bd);color:var(--st-late)}
+.tab .n.out{background:var(--st-out-bg);border-color:var(--st-out-bd);color:var(--st-out)}
+.pane{display:none}
+.pane.on{display:block}
+
+/* ====== TRAVA DO FORMULÁRIO ATÉ ABRIR TURNO ====== */
+#formWrap.locked{opacity:.35;pointer-events:none;filter:grayscale(.5);user-select:none}
+.lock-hint{display:none;text-align:center;font-size:15px;font-weight:700;color:var(--st-late);
+           background:var(--st-late-bg);border:2px dashed var(--st-late-bd);border-radius:var(--radius-lg);
+           padding:18px;margin:-.4rem 0 1rem}
+#formWrap.locked ~ .lock-hint{display:block}
+
+/* ====== LEGENDA DE CORES (ensina o código de cores na própria tela) ====== */
+.legenda{display:flex;gap:14px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--border);
+         border-radius:var(--radius);padding:10px 13px;margin-bottom:14px}
+.legenda .lg{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--text)}
+.legenda .dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(0,0,0,.12)}
+.dot.c-in{background:var(--st-in)} .dot.c-warn{background:var(--st-warn)}
+.dot.c-late{background:var(--st-late)} .dot.c-out{background:var(--st-out)}
+
+/* ====== PAINEL RESUMO (contadores clicáveis por cor) ====== */
+.resumo{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+@media(max-width:640px){.resumo{grid-template-columns:1fr 1fr}}
+.tile{border:2px solid var(--border);background:var(--surface);border-radius:var(--radius);padding:12px 10px;
+      text-align:center;cursor:pointer;font-family:inherit;transition:all .13s}
+.tile:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.1)}
+.tile .num{font-size:28px;font-weight:800;line-height:1}
+.tile .lab{font-size:11.5px;font-weight:700;margin-top:5px;letter-spacing:.02em}
+.tile.t-all{border-color:var(--border2)}          .tile.t-all .num{color:var(--dark)}          .tile.t-all .lab{color:var(--muted)}
+.tile.t-in{border-color:var(--st-in-bd)}          .tile.t-in .num{color:var(--st-in)}          .tile.t-in .lab{color:var(--st-in)}
+.tile.t-warn{border-color:var(--st-warn-bd)}      .tile.t-warn .num{color:var(--st-warn)}      .tile.t-warn .lab{color:var(--st-warn)}
+.tile.t-late{border-color:var(--st-late-bd)}      .tile.t-late .num{color:var(--st-late)}      .tile.t-late .lab{color:var(--st-late)}
+.tile.sel{box-shadow:0 0 0 3px rgba(0,0,0,.07)}
+.tile.sel.t-all{background:var(--surface2)}
+.tile.sel.t-in{background:var(--st-in-bg)}
+.tile.sel.t-warn{background:var(--st-warn-bg)}
+.tile.sel.t-late{background:var(--st-late-bg)}
+
+/* ====== ASSINATURA DESENHADA ====== */
+.assin-box{border:2px dashed var(--border2);border-radius:var(--radius);background:#fff;position:relative;overflow:hidden}
+.assin-box canvas{display:block;width:100%;height:160px;touch-action:none;cursor:crosshair}
+.assin-box .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+               font-size:14px;color:#B8B2AA;font-style:italic;pointer-events:none;text-align:center;padding:0 12px}
+.assin-box.tem .ph{display:none}
+.assin-base{position:absolute;left:8%;right:8%;bottom:26px;border-bottom:1.5px solid #DDD7D0;pointer-events:none}
+
+/* Assinatura já capturada, exibida na confirmação e no registro */
+.assin-card{display:flex;align-items:center;gap:14px;border:1px solid var(--border);background:var(--surface2);
+            border-radius:var(--radius);padding:10px 14px;margin-bottom:12px}
+.assin-card img{height:52px;width:auto;max-width:180px;object-fit:contain;background:#fff;
+                border:1px solid var(--border);border-radius:6px;padding:2px 6px;flex-shrink:0}
+.assin-card .who .k{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.assin-card .who .v{font-size:14.5px;font-weight:700;color:var(--text);margin-top:2px}
+.assin-card .who .t{font-size:11.5px;color:var(--muted);margin-top:2px}
+
+/* ====== TERMO + BOTÃO GRANDE DE CONFIRMAÇÃO ====== */
+.termo{font-size:14.5px;color:var(--text);line-height:1.6;background:var(--surface2);border:1px solid var(--border);
+       border-left:4px solid var(--red);border-radius:var(--radius);padding:14px 16px}
+.confirmar{display:flex;align-items:center;gap:14px;margin-top:14px;padding:16px 18px;min-height:64px;
+           border:2.5px solid var(--border2);border-radius:var(--radius-lg);background:var(--surface);cursor:pointer;
+           transition:all .15s;user-select:none}
+.confirmar:hover{border-color:var(--st-out);background:var(--surface2)}
+.confirmar input{position:absolute;opacity:0;width:0;height:0}
+.confirmar .mark{width:34px;height:34px;border-radius:8px;border:2.5px solid var(--border2);background:#fff;flex-shrink:0;
+                 display:flex;align-items:center;justify-content:center;transition:all .15s}
+.confirmar .mark::after{content:"";width:16px;height:9px;border-left:4px solid #fff;border-bottom:4px solid #fff;
+                        transform:rotate(-45deg) translate(1px,-2px);opacity:0;transition:opacity .15s}
+.confirmar .txt{font-size:15.5px;font-weight:800;color:var(--muted);letter-spacing:.02em}
+.confirmar.ok{border-color:var(--st-out);background:var(--st-out-bg)}
+.confirmar.ok .mark{background:var(--st-out);border-color:var(--st-out)}
+.confirmar.ok .mark::after{opacity:1}
+.confirmar.ok .txt{color:var(--st-out)}
+
+/* ====== CARTÕES DE REGISTRO ====== */
+.rec{border:1px solid var(--border);border-left:7px solid var(--border2);border-radius:var(--radius);
+     background:var(--surface);margin-bottom:12px;transition:box-shadow .13s,border-color .13s;cursor:pointer;overflow:hidden}
+.rec:hover{box-shadow:0 4px 16px rgba(0,0,0,.1)}
+.rec.s-in{border-left-color:var(--st-in)}
+.rec.s-warn{border-left-color:var(--st-warn)}
+.rec.s-late{border-left-color:var(--st-late)}
+.rec.s-out{border-left-color:var(--st-out)}
+/* Faixa colorida no topo: a situação é lida pela cor antes do texto */
+.rec-status{display:flex;align-items:center;gap:9px;padding:8px 14px;font-size:12.5px;font-weight:800;
+            letter-spacing:.03em;text-transform:uppercase;border-bottom:1px solid var(--border)}
+.rec.s-in   .rec-status{background:var(--st-in-bg);color:var(--st-in)}
+.rec.s-warn .rec-status{background:var(--st-warn-bg);color:var(--st-warn)}
+.rec.s-late .rec-status{background:var(--st-late-bg);color:var(--st-late)}
+.rec.s-out  .rec-status{background:var(--st-out-bg);color:var(--st-out)}
+.rec-status .dot{width:11px;height:11px;border-radius:50%;background:currentColor;flex-shrink:0}
+.rec-status .tempo{margin-left:auto;font-weight:800;letter-spacing:0;text-transform:none;font-size:13px}
+.rec-in{padding:13px 14px}
+.rec-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.rec-num{font-family:"Courier New",monospace;font-size:12.5px;font-weight:700;color:#fff;background:var(--dark);border-radius:6px;padding:4px 9px;flex-shrink:0}
+.rec-nome{font-size:16px;font-weight:800;color:var(--text)}
+.rec-emp{font-size:13px;color:var(--muted)}
+.rec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:9px 16px;font-size:13px}
+.rec-grid .k{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.rec-grid .v{color:var(--text);font-weight:600;margin-top:2px;word-break:break-word}
+.rec-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:11px;border-top:1px dashed var(--border)}
+
+/* ====== BADGES ====== */
+.bdg{font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:4px 10px;border-radius:20px;white-space:nowrap;border:1.5px solid transparent}
+.bdg.plate{font-family:"Courier New",monospace;font-size:14px;letter-spacing:.14em;background:#fff;border-color:var(--dark);color:var(--dark);padding:3px 11px;text-transform:none}
+.bdg.b-in{background:var(--st-in-bg);color:var(--st-in);border-color:var(--st-in-bd)}
+.bdg.b-warn{background:var(--st-warn-bg);color:var(--st-warn);border-color:var(--st-warn-bd)}
+.bdg.b-late{background:var(--st-late-bg);color:var(--st-late);border-color:var(--st-late-bd)}
+.bdg.b-out{background:var(--st-out-bg);color:var(--st-out);border-color:var(--st-out-bd)}
+
+/* ====== FILTROS + TABELA ====== */
+.filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:11px;align-items:end}
+@media(max-width:900px){.filters{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.filters{grid-template-columns:1fr}}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+table.tbl{width:100%;border-collapse:collapse;font-size:13px;min-width:920px}
+table.tbl th{background:var(--surface2);color:var(--muted);font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;text-align:left;padding:10px;border-bottom:1px solid var(--border)}
+table.tbl td{padding:10px;border-bottom:1px solid var(--border);vertical-align:top;color:var(--text)}
+table.tbl tbody tr{cursor:pointer;transition:background .1s}
+table.tbl tbody tr:hover{background:var(--surface2)}
+table.tbl tbody tr.l-in   td:first-child{box-shadow:inset 5px 0 0 var(--st-in)}
+table.tbl tbody tr.l-warn td:first-child{box-shadow:inset 5px 0 0 var(--st-warn)}
+table.tbl tbody tr.l-late td:first-child{box-shadow:inset 5px 0 0 var(--st-late)}
+table.tbl tbody tr.l-out  td:first-child{box-shadow:inset 5px 0 0 var(--st-out)}
+table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spacing:.06em}
+.tbl-sum{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:12px}
+.tbl-sum b{color:var(--text);font-weight:800}
+
+/* ====== MODAL ====== */
+.modal{position:fixed;inset:0;z-index:9000;background:rgba(26,18,16,.72);backdrop-filter:blur(3px);display:flex;align-items:flex-start;justify-content:center;padding:1.2rem;overflow-y:auto}
+.modal[hidden]{display:none}
+.modal-card{background:var(--surface);border-radius:var(--radius-lg);max-width:760px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;margin:auto}
+.modal-head{background:var(--dark);padding:1rem 1.3rem;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.modal-head h3{font-size:15px;font-weight:700;color:#F0E6E4}
+.modal-head .x{margin-left:auto;background:none;border:none;color:#A09090;font-size:26px;line-height:1;cursor:pointer;padding:0 6px;font-family:inherit}
+.modal-head .x:hover{color:#fff}
+.modal-body{padding:1.25rem 1.3rem;max-height:68vh;overflow-y:auto}
+.modal-foot{padding:1rem 1.3rem;border-top:1px solid var(--border);background:var(--surface2);display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:600px){.modal-foot .btn{width:100%}}
+.sec-title{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--red);margin:20px 0 9px;padding-bottom:5px;border-bottom:1px solid var(--border)}
+.sec-title:first-child{margin-top:0}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:11px 18px}
+.kv .k{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.kv .v{font-size:14.5px;color:var(--text);font-weight:600;margin-top:2px;word-break:break-word}
+.audit{list-style:none;font-size:12.5px}
+.audit li{padding:8px 0 8px 16px;border-left:2px solid var(--border);position:relative;color:var(--muted)}
+.audit li::before{content:"";position:absolute;left:-5px;top:13px;width:8px;height:8px;border-radius:50%;background:var(--border2)}
+.audit li b{color:var(--text);font-weight:700}
+.audit li .ts{font-family:"Courier New",monospace;font-size:11.5px;color:var(--muted)}
+.warn-box{font-size:13.5px;font-weight:600;border-radius:var(--radius);padding:12px 14px;margin-bottom:13px;border:1.5px solid;line-height:1.5}
+.warn-box.w{color:var(--st-warn);background:var(--st-warn-bg);border-color:var(--st-warn-bd)}
+.warn-box.e{color:var(--st-late);background:var(--st-late-bg);border-color:var(--st-late-bd)}
+.warn-box.i{color:var(--st-in);background:var(--st-in-bg);border-color:var(--st-in-bd)}
+.warn-box.g{color:var(--st-out);background:var(--st-out-bg);border-color:var(--st-out-bd)}
+</style>
+</head>
+<body>
+
+<div class="sticky-top">
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-logo">
+        <img id="logoImg" src="PERPEC - LOGO PRINCIPAL.png" alt="Perpec Oilfield Supply"/>
+      </div>
+      <div class="header-right">
+        <div class="title">Controle de Entrada de Veículos</div>
+        <div class="sub">Portaria — registro de entrada e saída</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="doc-strip">
+    <div class="doc-strip-inner">
+      <div>
+        <span class="doc-code-label">Documento</span>
+        <span class="doc-code-val" id="hdrDoc">—</span>
+      </div>
+      <span class="doc-meta" id="hdrRelogio">—</span>
+    </div>
+  </div>
+
+  <!-- Turno aberto: identifica quem está operando a portaria agora. -->
+  <div class="turno-strip off" id="turnoStrip">
+    <div class="turno-inner">
+      <span class="turno-dot" id="turnoDot"></span>
+      <span class="turno-txt" id="turnoTxt">Nenhum porteiro no turno</span>
+      <img class="assin-mini" id="turnoAssin" alt="assinatura" hidden/>
+      <button class="btn btn-dark btn-sm" id="turnoBtn" type="button" onclick="alternarTurno()">Começar turno</button>
+    </div>
+  </div>
+
+  <nav class="tabs">
+    <div class="tabs-inner">
+      <button class="tab sel" data-pane="novo"       onclick="irPara('novo')">Nova entrada</button>
+      <button class="tab"     data-pane="abertos"    onclick="irPara('abertos')">Estão dentro <span class="n zero" id="nAbertos">0</span></button>
+      <button class="tab"     data-pane="concluidos" onclick="irPara('concluidos')">Já saíram <span class="n zero" id="nConcluidos">0</span></button>
+      <button class="tab"     data-pane="historico"  onclick="irPara('historico')">Histórico <span class="n zero" id="nTotal">0</span></button>
+      <button class="tab"     data-pane="porteiros"  onclick="irPara('porteiros')">Porteiros <span class="n zero" id="nPorteiros">0</span></button>
+    </div>
+  </nav>
+</div>
+
+<main class="wrap">
+
+  <!-- ================= ABA: NOVA ENTRADA ================= -->
+  <section class="pane on" id="pane-novo">
+
+    <div id="formWrap">
+      <div class="card">
+        <div class="card-head">
+          <span class="step">1</span>
+          <h2>Quem está entrando</h2>
+        </div>
+        <div class="card-body">
+          <div class="g2" style="margin-bottom:14px">
+            <div class="field" id="wPessoa">
+              <label>Nome de quem entrou <span class="req">*</span></label>
+              <input type="text" id="fPessoa" placeholder="Nome completo" autocomplete="off" list="dlPessoas">
+              <span class="msg" id="mPessoa"></span>
+            </div>
+            <div class="field" id="wEmpresa">
+              <label>Empresa dessa pessoa <span class="req">*</span></label>
+              <input type="text" id="fEmpresa" placeholder="Nome da empresa" autocomplete="off" list="dlEmpresas">
+              <span class="msg" id="mEmpresa"></span>
+            </div>
+          </div>
+          <div class="field">
+            <label>Documento (RG, CPF ou CNH)</label>
+            <input type="text" id="fDocumento" placeholder="Opcional — mas peça e confira o documento" autocomplete="off">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="step">2</span>
+          <h2>Carro</h2>
+        </div>
+        <div class="card-body">
+          <div class="g2">
+            <div class="field" id="wPlaca">
+              <label>Placa do carro <span class="req">*</span></label>
+              <input type="text" id="fPlaca" maxlength="8" placeholder="ABC1D23" autocomplete="off"
+                     inputmode="latin" style="font-family:'Courier New',monospace;font-size:19px;font-weight:700;letter-spacing:.14em;text-align:center"
+                     oninput="mascararPlaca(this)">
+              <span class="hint">Sem traço. Aceita ABC1D23 (novo) e ABC1234 (antigo).</span>
+              <span class="msg" id="mPlaca"></span>
+            </div>
+            <div class="field">
+              <label>Modelo e cor do carro</label>
+              <input type="text" id="fVeiculo" placeholder="Ex.: Strada branca (opcional)" autocomplete="off">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="step">3</span>
+          <h2>Hora que entrou</h2>
+        </div>
+        <div class="card-body">
+          <div class="g2">
+            <div class="field" id="wEntrada">
+              <label>Dia e hora da entrada <span class="req">*</span></label>
+              <input type="datetime-local" id="fEntrada">
+              <span class="msg" id="mEntrada"></span>
+            </div>
+            <div class="field" style="justify-content:flex-end">
+              <button class="btn btn-outline" type="button" onclick="agoraNoCampo('fEntrada')">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                Usar a hora de agora
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="step">4</span>
+          <h2>Quem autorizou a entrada</h2>
+        </div>
+        <div class="card-body">
+          <div class="g2">
+            <div class="field" id="wSetor">
+              <label>Setor que autorizou <span class="req">*</span></label>
+              <select id="fSetor"></select>
+              <span class="msg" id="mSetor"></span>
+            </div>
+            <div class="field" id="wAutorizador">
+              <label>Nome de quem autorizou <span class="req">*</span></label>
+              <input type="text" id="fAutorizador" placeholder="Pessoa do setor que liberou" autocomplete="off" list="dlAutorizadores">
+              <span class="msg" id="mAutorizador"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="step">5</span>
+          <h2>Anotações e confirmação</h2>
+        </div>
+        <div class="card-body">
+          <div class="field" style="margin-bottom:18px">
+            <label>Anotações</label>
+            <textarea id="fObs" placeholder="Escreva aqui qualquer observação: material que entrou, acompanhante, aviso… (opcional)"></textarea>
+          </div>
+
+          <!-- Assinatura vem do turno aberto: o porteiro assina uma vez, ao começar. -->
+          <div class="assin-card" id="cardAssinEntrada">
+            <img id="pvAssinatura" alt="Assinatura do porteiro"/>
+            <div class="who">
+              <div class="k">Porteiro do turno</div>
+              <div class="v" id="pvPorteiro">—</div>
+              <div class="t" id="pvTurno">—</div>
+            </div>
+          </div>
+
+          <div class="termo" id="txtTermoEntrada"></div>
+
+          <label class="confirmar" id="boxTermo">
+            <input type="checkbox" id="fTermo" onchange="document.getElementById('boxTermo').classList.toggle('ok',this.checked)">
+            <span class="mark"></span>
+            <span class="txt">Toque aqui para confirmar</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="act-bar">
+        <div class="act-group">
+          <button class="btn btn-outline" type="button" onclick="limparFormulario(true)">Limpar tudo</button>
+        </div>
+        <div class="act-group">
+          <button class="btn btn-red btn-xl" type="button" onclick="salvarEntrada()" style="min-width:260px">
+            <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+            LIBERAR ENTRADA
+          </button>
+        </div>
+      </div>
+    </div><!-- /#formWrap -->
+    <div class="lock-hint">Comece o turno na faixa vermelha lá em cima para poder registrar entradas.</div>
+  </section>
+
+  <!-- ================= ABA: ESTÃO DENTRO ================= -->
+  <section class="pane" id="pane-abertos">
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><path d="M5 17h14M5 17a2 2 0 01-2-2v-3l2-5h14l2 5v3a2 2 0 01-2 2M5 17v2M19 17v2"/><circle cx="7.5" cy="14.5" r="1"/><circle cx="16.5" cy="14.5" r="1"/></svg>
+        <h2>Carros que estão dentro agora</h2>
+        <span class="count-pill" id="pillAbertos">—</span>
+      </div>
+      <div class="card-body">
+        <div class="resumo" id="resumoAbertos"></div>
+        <div class="legenda">
+          <span class="lg"><i class="dot c-in"></i> Dentro, tudo normal</span>
+          <span class="lg"><i class="dot c-warn"></i> Dentro há mais de <b id="lgH1"></b>h — verificar</span>
+          <span class="lg"><i class="dot c-late"></i> Dentro há mais de <b id="lgH2"></b>h — resolver</span>
+          <span class="lg"><i class="dot c-out"></i> Já saiu</span>
+        </div>
+        <div class="field" style="margin-bottom:14px">
+          <input type="text" id="buscaAbertos" placeholder="Procurar por nome, empresa ou placa…" oninput="renderAbertos()">
+        </div>
+        <div id="listaAbertos"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ABA: JÁ SAÍRAM ================= -->
+  <section class="pane" id="pane-concluidos">
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        <h2>Carros que já saíram</h2>
+        <span class="count-pill" id="pillConcluidos">—</span>
+      </div>
+      <div class="card-body">
+        <div class="field" style="margin-bottom:14px">
+          <input type="text" id="buscaConcluidos" placeholder="Procurar por nome, empresa ou placa…" oninput="renderConcluidos()">
+        </div>
+        <div id="listaConcluidos"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ABA: HISTÓRICO ================= -->
+  <section class="pane" id="pane-historico">
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
+        <h2>Histórico de entradas e saídas</h2>
+      </div>
+      <div class="card-body">
+        <div class="filters" style="margin-bottom:16px">
+          <div class="field">
+            <label>Procurar</label>
+            <input type="text" id="hBusca" placeholder="Nome, empresa, placa, número…" oninput="renderHistorico()">
+          </div>
+          <div class="field">
+            <label>De</label>
+            <input type="date" id="hDe" onchange="renderHistorico()">
+          </div>
+          <div class="field">
+            <label>Até</label>
+            <input type="date" id="hAte" onchange="renderHistorico()">
+          </div>
+          <div class="field">
+            <label>Situação</label>
+            <select id="hStatus" onchange="renderHistorico()">
+              <option value="">Todas</option>
+              <option value="aberto">Está dentro</option>
+              <option value="concluido">Já saiu</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Setor</label>
+            <select id="hSetor" onchange="renderHistorico()"><option value="">Todos</option></select>
+          </div>
+        </div>
+
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Registro</th><th>Quem entrou</th><th>Empresa</th><th>Placa</th>
+                <th>Entrou</th><th>Saiu</th><th>Tempo dentro</th>
+                <th>Quem autorizou</th><th>Porteiro</th><th>Situação</th>
+              </tr>
+            </thead>
+            <tbody id="tbHistorico"></tbody>
+          </table>
+        </div>
+        <div class="tbl-sum" id="sumHistorico"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        <h2>Cópia de segurança</h2>
+      </div>
+      <div class="card-body">
+        <div class="warn-box w" style="margin-bottom:16px">
+          Os registros ficam guardados só neste computador. Se alguém limpar o navegador, os dados somem.
+          <b>Faça a cópia de segurança toda semana</b> e guarde o arquivo em pasta da rede.
+        </div>
+        <div class="act-group">
+          <button class="btn btn-dark"    type="button" onclick="exportarCSV()">Exportar para Excel</button>
+          <button class="btn btn-outline" type="button" onclick="exportarBackup()">Salvar cópia de segurança</button>
+          <button class="btn btn-outline" type="button" onclick="document.getElementById('fileImport').click()">Restaurar cópia</button>
+          <input type="file" id="fileImport" accept=".json,application/json" hidden onchange="importarBackup(this)">
+        </div>
+        <div class="tbl-sum" id="usoEspaco" style="margin-top:14px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ABA: PORTEIROS ================= -->
+  <section class="pane" id="pane-porteiros">
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <h2>Porteiros cadastrados</h2>
+        <span class="count-pill" id="pillPorteiros">—</span>
+      </div>
+      <div class="card-body">
+        <div class="warn-box i" style="margin-bottom:16px">
+          Cadastre cada porteiro <b>uma vez só</b>, com matrícula, nome completo e assinatura.
+          No dia a dia ele só digita o número da matrícula ao começar o turno — o nome e a assinatura
+          entram sozinhos em todos os registros.
+        </div>
+        <div class="act-group" style="margin-bottom:18px">
+          <button class="btn btn-red" type="button" onclick="novoPorteiro()">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            Cadastrar porteiro
+          </button>
+          <button class="btn btn-outline" type="button" onclick="exportarPorteiros()">Salvar cadastro (.json)</button>
+          <button class="btn btn-outline" type="button" onclick="document.getElementById('filePorteiros').click()">Carregar cadastro</button>
+          <input type="file" id="filePorteiros" accept=".json,.csv,application/json,text/csv" hidden onchange="importarPorteiros(this)">
+        </div>
+        <div id="listaPorteiros"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="page-footer">Perpec Oilfield Supply — <span id="ftDoc"></span></div>
+</main>
+
+<!-- listas de sugestão alimentadas pelo próprio histórico -->
+<datalist id="dlPessoas"></datalist>
+<datalist id="dlEmpresas"></datalist>
+<datalist id="dlAutorizadores"></datalist>
+
+<!-- ================= MODAL ================= -->
+<div class="modal" id="modal" hidden onclick="if(event.target===this)fecharModal()">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="modalTitulo">Registro</h3>
+      <button class="x" type="button" onclick="fecharModal()" aria-label="Fechar">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================================================================
+   CONTROLE DE ENTRADA DE VEÍCULOS — PORTARIA
+   ----------------------------------------------------------------
+   Aplicação de página única, sem servidor. O "banco de dados" é o
+   localStorage do navegador (CONFIG.DB_KEY), com:
+     - numeração sequencial por ano
+     - assinatura DESENHADA do porteiro, capturada uma vez por turno
+     - trilha de auditoria por registro (append-only)
+     - selo de integridade (detecta edição direta do armazenamento)
+     - backup/restauração em JSON e exportação em CSV
+
+   CÓDIGO DE CORES (vale em toda a interface e nos PDFs):
+     AZUL     dentro da unidade, dentro do tempo normal
+     AMARELO  dentro há mais de CONFIG.ALERTA_PERMANENCIA_H horas
+     VERMELHO dentro há mais de CONFIG.CRITICO_PERMANENCIA_H horas
+     VERDE    já saiu / registro concluído
+   ================================================================ */
+
+/* ---------------- Estado em memória ---------------- */
+let DB = null;             // objeto persistido (ver dbVazio())
+let ABA = 'novo';          // aba corrente
+let MODAL_ID = null;       // id do registro aberto no modal
+let FILTRO_ABERTOS = '';   // '', 'in', 'warn', 'late' — filtro do painel resumo
+let PAD = null;            // instância do bloco de assinatura em uso
+
+/* ================================================================
+   1. PERSISTÊNCIA
+   ================================================================ */
+function dbVazio(){
+  // porteiros:    cadastro fixo — { matricula, nome, assinId, ativo, criadoEm }
+  // assinaturas:  { id -> dataURL PNG }. Uma por PORTEIRO (não por registro),
+  //               então o armazenamento não cresce com o movimento da portaria.
+  return { v:3, seq:{}, registros:[], porteiros:[], turno:null, assinaturas:{}, rascunho:null };
+}
+
+function dbCarregar(){
+  let raw=null;
+  try{ raw=localStorage.getItem(CONFIG.DB_KEY); }
+  catch(e){ showToast('Este navegador não deixa guardar dados.','error'); return dbVazio(); }
+  if(!raw) return dbVazio();
+  try{
+    const o=JSON.parse(raw);
+    if(!o || typeof o!=='object' || !Array.isArray(o.registros)) throw new Error('formato');
+    return Object.assign(dbVazio(),o);
+  }catch(e){
+    // Não sobrescreve: guarda o conteúdo corrompido para eventual recuperação manual.
+    try{ localStorage.setItem(CONFIG.DB_KEY+'.corrompido.'+Date.now(), raw); }catch(_){}
+    showToast('Não consegui ler os dados salvos. Uma cópia foi guardada.','error');
+    return dbVazio();
+  }
+}
+
+function dbSalvar(){
+  try{
+    localStorage.setItem(CONFIG.DB_KEY, JSON.stringify(DB));
+    return true;
+  }catch(e){
+    showToast('Não consegui salvar.\nFaça a cópia de segurança agora.','error');
+    return false;
+  }
+}
+
+/* Sequência PORT-2026-0001, reiniciada a cada ano. */
+function proximoNumero(data){
+  const ano=String((data||new Date()).getFullYear());
+  const n=(DB.seq[ano]||0)+1;
+  return { numero:CONFIG.PREFIXO_REGISTRO+'-'+ano+'-'+String(n).padStart(4,'0'), ano:ano, n:n };
+}
+function consumirNumero(ano,n){ DB.seq[ano]=Math.max(DB.seq[ano]||0,n); }
+
+/* ================================================================
+   2. INTEGRIDADE (evidência de adulteração)
+   ----------------------------------------------------------------
+   Selo FNV-1a sobre os campos de negócio. Não é criptografia: serve
+   para acusar edição feita direto no localStorage, fora da tela.
+   Toda gravação legítima re-sela o registro.
+   ================================================================ */
+const CAMPOS_SELADOS=['numero','pessoa','documento','empresa','veiculo','placa','entrada','saida',
+                      'setor','autorizador','porteiroEntrada','matriculaEntrada','turnoEntrada',
+                      'porteiroSaida','matriculaSaida','turnoSaida','status','observacoes'];
+
+function selo(r){
+  const base=JSON.stringify(CAMPOS_SELADOS.map(k=>r[k]==null?'':String(r[k])))
+           + JSON.stringify(r.confirmEntrada||null)
+           + JSON.stringify(r.confirmSaida||null)
+           + JSON.stringify((r.auditoria||[]).map(a=>a.ts+'|'+a.evento));
+  let h=0x811c9dc5;
+  for(let i=0;i<base.length;i++){ h^=base.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
+  return h.toString(16).padStart(8,'0');
+}
+function selar(r){ r.selo=selo(r); return r; }
+function integro(r){ return r.selo===selo(r); }
+
+/* ================================================================
+   3. UTILITÁRIOS
+   ================================================================ */
+function uid(){ return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function p2(n){ return String(n).padStart(2,'0'); }
+
+function toInputDT(iso){
+  if(!iso) return '';
+  const d=new Date(iso); if(isNaN(d)) return '';
+  return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+'T'+p2(d.getHours())+':'+p2(d.getMinutes());
+}
+function fromInputDT(v){ if(!v) return null; const d=new Date(v); return isNaN(d)?null:d.toISOString(); }
+function fmtDT(iso){
+  if(!iso) return '—';
+  const d=new Date(iso); if(isNaN(d)) return '—';
+  return p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear()+' '+p2(d.getHours())+':'+p2(d.getMinutes());
+}
+
+function duracao(ms){
+  if(ms==null||isNaN(ms)||ms<0) return '—';
+  const min=Math.floor(ms/60000), h=Math.floor(min/60), m=min%60;
+  if(h>=24){ const d=Math.floor(h/24); return d+'d '+(h%24)+'h'; }
+  return (h?h+'h ':'')+m+'min';
+}
+function permanenciaMs(r){
+  if(!r.entrada) return null;
+  const fim=r.saida?new Date(r.saida):new Date();
+  return fim-new Date(r.entrada);
+}
+
+/* Placa: aceita Mercosul (ABC1D23) e o padrão antigo (ABC1234). */
+function normalizarPlaca(v){ return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,7); }
+function placaValida(p){ return /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(p) || /^[A-Z]{3}[0-9]{4}$/.test(p); }
+function placaBonita(p){ return /^[A-Z]{3}[0-9]{4}$/.test(p) ? p.slice(0,3)+'-'+p.slice(3) : p; }
+function mascararPlaca(el){ const c=el.selectionStart; el.value=normalizarPlaca(el.value); try{el.setSelectionRange(c,c);}catch(e){} }
+
+/* Comparação tolerante a acento/caixa/espaço. */
+function chave(s){
+  return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+}
+
+function showToast(msg,type=''){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.className='toast'+(type?' '+type:''); el.classList.add('show');
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),4500);
+}
+function marcarErro(campo,msg){
+  const w=document.getElementById('w'+campo);
+  if(!w) return;
+  w.classList.toggle('err',!!msg);
+  const m=document.getElementById('m'+campo);
+  if(m) m.textContent=msg||'';
+}
+function limparErros(){ document.querySelectorAll('.field.err').forEach(f=>f.classList.remove('err')); }
+
+/* ================================================================
+   4. SITUAÇÃO E CORES
+   ----------------------------------------------------------------
+   situacao() é a fonte única do código de cores. Tudo o que pinta
+   algo na tela (cartão, tabela, painel, badge) passa por aqui.
+   ================================================================ */
+function situacao(r){
+  if(r.status!=='aberto') return 'out';
+  const h=permanenciaMs(r)/3600000;
+  if(h>=CONFIG.CRITICO_PERMANENCIA_H) return 'late';
+  if(h>=CONFIG.ALERTA_PERMANENCIA_H)  return 'warn';
+  return 'in';
+}
+const ROTULO_SIT = {
+  in:  'Está dentro',
+  warn:'Dentro há muito tempo',
+  late:'Dentro há tempo demais',
+  out: 'Já saiu'
+};
+
+/* ================================================================
+   5. TRILHA DE AUDITORIA
+   ----------------------------------------------------------------
+   Só cresce: nada é removido ou reescrito pela interface. Entra no
+   cálculo do selo, então apagar um evento na mão quebra a integridade.
+   ================================================================ */
+function auditar(r,evento,detalhe){
+  r.auditoria=r.auditoria||[];
+  r.auditoria.push({
+    ts:new Date().toISOString(),
+    evento:evento,
+    detalhe:detalhe||'',
+    autor:(DB.turno&&DB.turno.porteiro)||r.porteiroEntrada||'—'
+  });
+}
+
+/* ================================================================
+   6. BLOCO DE ASSINATURA (desenho a dedo ou mouse)
+   ----------------------------------------------------------------
+   Substitui a digitação do nome: o porteiro assina de verdade, uma
+   vez, ao começar o turno. A imagem é reaproveitada por todos os
+   registros daquele turno (DB.assinaturas[id]) — assim a assinatura
+   sai no PDF sem lotar o armazenamento do navegador.
+   ================================================================ */
+function criarPad(canvas){
+  const ctx=canvas.getContext('2d');
+  // Resolução fixa e modesta: legível no PDF e leve para guardar.
+  canvas.width=560; canvas.height=170;
+  ctx.lineWidth=3.2; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#18171A';
+  let desenhando=false, temTraco=false;
+
+  const ponto=ev=>{
+    const b=canvas.getBoundingClientRect();
+    return { x:(ev.clientX-b.left)*(canvas.width/b.width), y:(ev.clientY-b.top)*(canvas.height/b.height) };
+  };
+  const inicio=ev=>{
+    ev.preventDefault(); desenhando=true;
+    if(!temTraco){ temTraco=true; canvas.parentNode.classList.add('tem'); }
+    const p=ponto(ev); ctx.beginPath(); ctx.moveTo(p.x,p.y);
+    // Um toque sem arrastar também deixa marca.
+    ctx.lineTo(p.x+0.1,p.y); ctx.stroke();
+    try{ canvas.setPointerCapture(ev.pointerId); }catch(e){}
+  };
+  const mover=ev=>{ if(!desenhando) return; ev.preventDefault(); const p=ponto(ev); ctx.lineTo(p.x,p.y); ctx.stroke(); };
+  const fim=()=>{ desenhando=false; };
+
+  canvas.addEventListener('pointerdown',inicio);
+  canvas.addEventListener('pointermove',mover);
+  canvas.addEventListener('pointerup',fim);
+  canvas.addEventListener('pointercancel',fim);
+  canvas.addEventListener('pointerleave',fim);
+
+  return {
+    vazio(){ return !temTraco; },
+    limpar(){ ctx.clearRect(0,0,canvas.width,canvas.height); temTraco=false; canvas.parentNode.classList.remove('tem'); },
+    // Fundo branco explícito: PDF e miniaturas não dependem de transparência.
+    imagem(){
+      const t=document.createElement('canvas');
+      t.width=canvas.width; t.height=canvas.height;
+      const c=t.getContext('2d');
+      c.fillStyle='#FFFFFF'; c.fillRect(0,0,t.width,t.height);
+      c.drawImage(canvas,0,0);
+      return t.toDataURL('image/png');
+    }
+  };
+}
+
+function htmlPad(id){
+  return '<div class="assin-box" id="'+id+'Box">'+
+           '<canvas id="'+id+'"></canvas>'+
+           '<div class="assin-base"></div>'+
+           '<div class="ph">Assine aqui com o dedo ou com o mouse</div>'+
+         '</div>'+
+         '<div style="display:flex;justify-content:flex-end;margin-top:8px">'+
+           '<button class="btn btn-outline btn-sm" type="button" onclick="PAD&&PAD.limpar()">Apagar e assinar de novo</button>'+
+         '</div>';
+}
+
+/* ================================================================
+   7. CADASTRO DE PORTEIROS
+   ----------------------------------------------------------------
+   Cadastro feito uma vez: matrícula (número), nome completo e
+   assinatura desenhada. No dia a dia o porteiro só digita a
+   matrícula — nome e assinatura vêm sozinhos.
+   ================================================================ */
+function normalizarMatricula(v){ return String(v||'').replace(/\D/g,'').slice(0,10); }
+function acharPorteiro(mat){
+  const m=normalizarMatricula(mat);
+  if(!m) return null;
+  return DB.porteiros.find(p=>p.matricula===m)||null;
+}
+
+function novoPorteiro(){ formPorteiro(null); }
+function editarPorteiro(mat){ formPorteiro(acharPorteiro(mat)); }
+
+function formPorteiro(p){
+  const novo=!p;
+  const assinAtual = p ? (DB.assinaturas[p.assinId]||'') : '';
+  abrirModalCustom(novo?'Cadastrar porteiro':'Editar porteiro',
+    '<div class="g2" style="margin-bottom:14px">'+
+      '<div class="field">'+
+        '<label>Matrícula <span class="req">*</span></label>'+
+        '<input type="text" id="pMat" inputmode="numeric" maxlength="10" value="'+esc(p?p.matricula:'')+'" '+
+          (novo?'':'readonly ')+'placeholder="Ex.: 1042" autocomplete="off" '+
+          'style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;letter-spacing:.12em;text-align:center" '+
+          'oninput="this.value=this.value.replace(/\\D/g,\'\')">'+
+        '<span class="hint">'+(novo?'Só números. Não pode repetir.':'A matrícula não pode ser trocada.')+'</span>'+
+      '</div>'+
+      '<div class="field">'+
+        '<label>Nome completo <span class="req">*</span></label>'+
+        '<input type="text" id="pNome" value="'+esc(p?p.nome:'')+'" placeholder="Nome do porteiro" autocomplete="off">'+
+      '</div>'+
+    '</div>'+
+    (assinAtual
+      ? '<div class="assin-card"><img src="'+assinAtual+'" alt="assinatura"/>'+
+        '<div class="who"><div class="k">Assinatura cadastrada</div>'+
+        '<div class="t">Só desenhe abaixo se quiser trocar.</div></div></div>'
+      : '')+
+    '<div class="field">'+
+      '<label>Assinatura '+(assinAtual?'(nova, opcional)':'<span class="req">*</span>')+'</label>'+
+      htmlPad('pAssin')+
+      '<span class="hint">Assine com o dedo (tela sensível) ou com o mouse. '+
+      'Esta assinatura sai nos PDFs de todas as entradas liberadas por ele.</span>'+
+    '</div>',
+    [{txt:'Cancelar',cls:'btn-outline',fn:()=>{ fecharModal(); }},
+     {txt:novo?'Cadastrar':'Salvar',cls:'btn-red',fn:()=>salvarPorteiro(novo?null:p.matricula)}]);
+
+  setTimeout(()=>{
+    PAD=criarPad(document.getElementById('pAssin'));
+    const el=document.getElementById(novo?'pMat':'pNome'); if(el) el.focus();
+  },60);
+}
+
+function salvarPorteiro(matOriginal){
+  const mat=normalizarMatricula(document.getElementById('pMat').value);
+  const nome=(document.getElementById('pNome').value||'').trim();
+  const novo=!matOriginal;
+
+  if(!mat){ showToast('Informe a matrícula.','error'); return; }
+  if(nome.length<5){ showToast('Escreva o nome completo.','error'); return; }
+  if(novo && acharPorteiro(mat)){ showToast('Já existe porteiro com a matrícula '+mat+'.','error'); return; }
+
+  const desenhou = PAD && !PAD.vazio();
+  let p = novo ? null : acharPorteiro(matOriginal);
+
+  if(novo){
+    if(!desenhou){ showToast('Falta assinar no quadro branco.','error'); return; }
+    const aid='p'+mat+'.'+Date.now().toString(36);
+    DB.assinaturas[aid]=PAD.imagem();
+    DB.porteiros.push({ matricula:mat, nome:nome, assinId:aid, ativo:true, criadoEm:new Date().toISOString() });
+  }else{
+    p.nome=nome;
+    if(desenhou){
+      // Assinatura antiga fica guardada: registros antigos continuam apontando para ela.
+      const aid='p'+p.matricula+'.'+Date.now().toString(36);
+      DB.assinaturas[aid]=PAD.imagem();
+      p.assinId=aid;
+    }
+  }
+  PAD=null;
+  if(!dbSalvar()) return;
+
+  // Turno em andamento do mesmo porteiro passa a usar os dados novos.
+  if(DB.turno && DB.turno.matricula===(novo?mat:matOriginal)){
+    const at=acharPorteiro(DB.turno.matricula);
+    DB.turno.porteiro=at.nome; DB.turno.assinId=at.assinId;
+    dbSalvar();
+  }
+  fecharModal(); renderTurno(); renderTudo();
+  showToast(novo?('Porteiro '+mat+' cadastrado.'):'Cadastro atualizado.','success');
+}
+
+function alternarAtivoPorteiro(mat){
+  const p=acharPorteiro(mat); if(!p) return;
+  if(p.ativo && DB.turno && DB.turno.matricula===p.matricula){
+    showToast('Este porteiro está em turno. Encerre o turno antes de desativar.','error'); return;
+  }
+  p.ativo=!p.ativo;
+  if(!dbSalvar()) return;
+  renderTudo();
+  showToast(p.nome+(p.ativo?' reativado.':' desativado.'));
+}
+
+function excluirPorteiro(mat){
+  const p=acharPorteiro(mat); if(!p) return;
+  const usos=DB.registros.filter(r=>r.matriculaEntrada===p.matricula||r.matriculaSaida===p.matricula).length;
+  if(usos){
+    showToast('Não dá para apagar: '+p.nome+' aparece em '+usos+' registro(s).\nUse "Desativar".','error');
+    return;
+  }
+  if(DB.turno && DB.turno.matricula===p.matricula){ showToast('Encerre o turno deste porteiro primeiro.','error'); return; }
+  if(!confirm('Apagar o cadastro de '+p.nome+' (matrícula '+p.matricula+')?')) return;
+  delete DB.assinaturas[p.assinId];
+  DB.porteiros=DB.porteiros.filter(x=>x.matricula!==p.matricula);
+  if(!dbSalvar()) return;
+  renderTudo();
+  showToast('Cadastro apagado.');
+}
+
+function renderPorteiros(){
+  const lista=DB.porteiros.slice().sort((a,b)=>a.matricula.localeCompare(b.matricula,'pt-BR',{numeric:true}));
+  const el=document.getElementById('listaPorteiros');
+  el.innerHTML = lista.length ? lista.map(p=>{
+    const img=DB.assinaturas[p.assinId]||'';
+    const emTurno = DB.turno && DB.turno.matricula===p.matricula;
+    return '<div class="rec '+(p.ativo?'s-out':'')+'" style="cursor:default">'+
+      '<div class="rec-status" style="'+(p.ativo?'':'background:var(--surface2);color:var(--muted)')+'">'+
+        '<span class="dot"></span>'+(p.ativo?'Ativo':'Desativado')+
+        (emTurno?'<span class="bdg b-in" style="margin-left:8px">EM TURNO AGORA</span>':'')+
+      '</div>'+
+      '<div class="rec-in">'+
+        '<div class="rec-top">'+
+          '<span class="bdg plate">'+esc(p.matricula)+'</span>'+
+          '<span class="rec-nome">'+esc(p.nome)+'</span>'+
+          (img?'<img src="'+img+'" alt="assinatura" style="margin-left:auto;height:44px;width:auto;max-width:150px;object-fit:contain;background:#fff;border:1px solid var(--border);border-radius:6px;padding:2px 6px"/>':'')+
+        '</div>'+
+        '<div class="rec-acts">'+
+          '<button class="btn btn-outline btn-sm" onclick="editarPorteiro(\''+p.matricula+'\')">Editar / trocar assinatura</button>'+
+          '<button class="btn btn-outline btn-sm" onclick="alternarAtivoPorteiro(\''+p.matricula+'\')">'+(p.ativo?'Desativar':'Reativar')+'</button>'+
+          '<button class="btn btn-outline btn-sm" onclick="excluirPorteiro(\''+p.matricula+'\')">Apagar</button>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }).join('') : '<div class="empty-state">Nenhum porteiro cadastrado ainda.<br>Clique em <b>Cadastrar porteiro</b> para começar.</div>';
+
+  const ativos=lista.filter(p=>p.ativo).length;
+  document.getElementById('pillPorteiros').textContent=ativos+' ativo(s) de '+lista.length;
+  const n=document.getElementById('nPorteiros');
+  n.textContent=lista.length; n.className='n '+(lista.length?'out':'zero');
+}
+
+/* Cadastro portátil entre computadores da portaria (JSON com as assinaturas,
+   ou CSV simples "matricula;nome" para dar carga inicial rápida). */
+function exportarPorteiros(){
+  const assin={};
+  DB.porteiros.forEach(p=>{ if(DB.assinaturas[p.assinId]) assin[p.assinId]=DB.assinaturas[p.assinId]; });
+  baixarArquivo('Portaria-Porteiros-'+new Date().toISOString().slice(0,10)+'.json',
+                JSON.stringify({ tipo:'porteiros', porteiros:DB.porteiros, assinaturas:assin },null,2),
+                'application/json');
+  showToast('Cadastro salvo na pasta de downloads.','success');
+}
+
+function importarPorteiros(input){
+  const f=input.files&&input.files[0];
+  input.value='';
+  if(!f) return;
+  const csv=/\.csv$/i.test(f.name);
+  const fr=new FileReader();
+  fr.onload=()=>{
+    let entrada=[], assin={};
+    if(csv){
+      // "matricula;nome" (ou vírgula). Sem assinatura — cada um assina depois.
+      String(fr.result).split(/\r?\n/).forEach((ln,i)=>{
+        const t=ln.trim(); if(!t) return;
+        const c=t.split(/[;,\t]/);
+        const mat=normalizarMatricula(c[0]), nome=(c[1]||'').trim();
+        if(i===0 && !mat) return;                 // cabeçalho
+        if(mat && nome.length>=3) entrada.push({matricula:mat,nome:nome,assinId:'',ativo:true,criadoEm:new Date().toISOString()});
+      });
+    }else{
+      let o; try{ o=JSON.parse(fr.result); }catch(e){ showToast('Arquivo inválido.','error'); return; }
+      if(!o||!Array.isArray(o.porteiros)){ showToast('Este arquivo não é um cadastro de porteiros.','error'); return; }
+      entrada=o.porteiros; assin=o.assinaturas||{};
+    }
+    if(!entrada.length){ showToast('Nenhum porteiro encontrado no arquivo.','error'); return; }
+
+    const existentes=new Set(DB.porteiros.map(p=>p.matricula));
+    const novos=entrada.filter(p=>p&&p.matricula&&!existentes.has(String(p.matricula)));
+    if(!confirm('O arquivo tem '+entrada.length+' porteiro(s).\n'+
+                novos.length+' serão acrescentados; '+(entrada.length-novos.length)+' já existem e serão ignorados.\n\nContinuar?')) return;
+
+    Object.assign(DB.assinaturas,assin);
+    novos.forEach(p=>DB.porteiros.push({
+      matricula:String(p.matricula), nome:String(p.nome||'').trim(),
+      assinId:p.assinId||'', ativo:p.ativo!==false, criadoEm:p.criadoEm||new Date().toISOString()
+    }));
+    if(!dbSalvar()) return;
+    renderTudo();
+    const semAssin=novos.filter(p=>!p.assinId||!DB.assinaturas[p.assinId]).length;
+    showToast(novos.length+' porteiro(s) carregados.'+(semAssin?'\n'+semAssin+' ainda precisam assinar (Editar).':''),'success');
+  };
+  fr.onerror=()=>showToast('Não consegui ler o arquivo.','error');
+  fr.readAsText(f);
+}
+
+/* ================================================================
+   7b. TURNO
+   ----------------------------------------------------------------
+   Enquanto não houver turno aberto o formulário fica travado. Isso
+   garante que todo registro nasça com um porteiro identificado por
+   matrícula e com assinatura cadastrada.
+   ================================================================ */
+function alternarTurno(){ DB.turno ? encerrarTurno() : abrirTurno(); }
+
+function abrirTurno(){
+  const ativos=DB.porteiros.filter(p=>p.ativo);
+  if(!ativos.length){
+    abrirModalCustom('Nenhum porteiro cadastrado',
+      '<div class="warn-box w">Antes de começar o turno é preciso cadastrar pelo menos um porteiro, '+
+      'com matrícula, nome completo e assinatura.</div>',
+      [{txt:'Agora não',cls:'btn-outline',fn:fecharModal},
+       {txt:'Cadastrar porteiro',cls:'btn-red',fn:()=>{ irPara('porteiros'); novoPorteiro(); }}]);
+    return;
+  }
+  const opts=CONFIG.TURNOS.map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join('');
+  abrirModalCustom('Começar turno',
+    '<div class="field" style="margin-bottom:14px">'+
+      '<label>Digite sua matrícula <span class="req">*</span></label>'+
+      '<input type="text" id="tMat" inputmode="numeric" maxlength="10" placeholder="0000" autocomplete="off" '+
+        'style="font-family:\'Courier New\',monospace;font-size:26px;font-weight:700;letter-spacing:.18em;text-align:center" '+
+        'oninput="this.value=this.value.replace(/\\D/g,\'\');buscarMatricula()">'+
+    '</div>'+
+    '<div id="tAchado" style="margin-bottom:14px"></div>'+
+    '<div class="field">'+
+      '<label>Turno <span class="req">*</span></label>'+
+      '<select id="tTurno">'+opts+'</select>'+
+    '</div>',
+    [{txt:'Cancelar',cls:'btn-outline',fn:fecharModal},
+     {txt:'Começar turno',cls:'btn-green',fn:confirmarAbrirTurno}]);
+  buscarMatricula();
+  setTimeout(()=>{ const el=document.getElementById('tMat'); if(el) el.focus(); },60);
+}
+
+/* Busca ao vivo: assim que a matrícula bate, mostra nome e assinatura. */
+function buscarMatricula(){
+  const el=document.getElementById('tMat'); if(!el) return;
+  const alvo=document.getElementById('tAchado');
+  const mat=normalizarMatricula(el.value);
+  if(!mat){ alvo.innerHTML='<div class="warn-box i">Digite o número da sua matrícula.</div>'; return; }
+  const p=acharPorteiro(mat);
+  if(!p){
+    alvo.innerHTML='<div class="warn-box e">Matrícula <b>'+esc(mat)+'</b> não está cadastrada.</div>';
+    return;
+  }
+  if(!p.ativo){
+    alvo.innerHTML='<div class="warn-box e"><b>'+esc(p.nome)+'</b> está desativado no cadastro.</div>';
+    return;
+  }
+  const img=DB.assinaturas[p.assinId]||'';
+  alvo.innerHTML='<div class="assin-card" style="margin-bottom:0">'+
+    (img?'<img src="'+img+'" alt="assinatura"/>':'')+
+    '<div class="who"><div class="k">Matrícula '+esc(p.matricula)+'</div>'+
+    '<div class="v">'+esc(p.nome)+'</div>'+
+    (img?'<div class="t">Assinatura cadastrada</div>':'<div class="t" style="color:var(--st-late)">Sem assinatura — cadastre em Porteiros</div>')+
+    '</div></div>';
+}
+
+function confirmarAbrirTurno(){
+  const mat=normalizarMatricula(document.getElementById('tMat').value);
+  const turno=document.getElementById('tTurno').value;
+  const p=acharPorteiro(mat);
+  if(!p){ showToast('Matrícula não cadastrada.','error'); document.getElementById('tMat').focus(); return; }
+  if(!p.ativo){ showToast('Este porteiro está desativado no cadastro.','error'); return; }
+  if(!DB.assinaturas[p.assinId]){ showToast('Este porteiro ainda não tem assinatura cadastrada.','error'); return; }
+
+  DB.turno={ matricula:p.matricula, porteiro:p.nome, turno:turno,
+             inicio:new Date().toISOString(), assinId:p.assinId };
+  if(!dbSalvar()) return;
+  fecharModal(); renderTurno();
+  showToast('Turno começado — '+p.nome,'success');
+}
+
+function encerrarTurno(){
+  const dentro=DB.registros.filter(r=>r.status==='aberto').length;
+  const aviso = dentro ? '\n\nATENÇÃO: ainda tem '+dentro+' carro(s) dentro da unidade.' : '';
+  if(!confirm('Encerrar o turno de '+DB.turno.porteiro+'?'+aviso)) return;
+  const nome=DB.turno.porteiro;
+  DB.turno=null;
+  if(!dbSalvar()) return;
+  renderTurno();
+  showToast('Turno de '+nome+' encerrado.');
+}
+
+function renderTurno(){
+  const strip=document.getElementById('turnoStrip');
+  const dot=document.getElementById('turnoDot');
+  const txt=document.getElementById('turnoTxt');
+  const btn=document.getElementById('turnoBtn');
+  const mini=document.getElementById('turnoAssin');
+  const wrap=document.getElementById('formWrap');
+
+  if(DB.turno){
+    strip.classList.remove('off');
+    dot.classList.add('on');
+    txt.innerHTML='No turno: <b>'+esc(DB.turno.porteiro)+'</b> <span class="sub">— mat. '+esc(DB.turno.matricula||'—')+
+                  ' · '+esc(DB.turno.turno)+' · desde '+fmtDT(DB.turno.inicio)+'</span>';
+    btn.textContent='Encerrar turno'; btn.className='btn btn-outline btn-sm';
+    wrap.classList.remove('locked');
+    const img=DB.assinaturas[DB.turno.assinId];
+    mini.hidden=!img; if(img) mini.src=img;
+    // espelha a assinatura no cartão de confirmação do formulário
+    const pv=document.getElementById('pvAssinatura');
+    if(img){ pv.src=img; pv.style.display=''; } else { pv.style.display='none'; }
+    document.getElementById('pvPorteiro').textContent=DB.turno.porteiro;
+    document.getElementById('pvTurno').textContent='Matrícula '+(DB.turno.matricula||'—')+' · '+DB.turno.turno;
+  }else{
+    strip.classList.add('off');
+    dot.classList.remove('on');
+    txt.innerHTML='Nenhum porteiro no turno <span class="sub">— comece o turno para registrar entradas</span>';
+    btn.textContent='Começar turno'; btn.className='btn btn-dark btn-sm';
+    wrap.classList.add('locked');
+    mini.hidden=true;
+    document.getElementById('pvAssinatura').style.display='none';
+    document.getElementById('pvPorteiro').textContent='—';
+    document.getElementById('pvTurno').textContent='—';
+  }
+}
+
+/* ================================================================
+   8. FORMULÁRIO DE ENTRADA
+   ================================================================ */
+function agoraNoCampo(id){ document.getElementById(id).value=toInputDT(new Date().toISOString()); salvarRascunho(); }
+
+function preencherSelects(){
+  const o=CONFIG.SETORES.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join('');
+  document.getElementById('fSetor').innerHTML='<option value="">Escolha o setor…</option>'+o;
+  document.getElementById('hSetor').innerHTML='<option value="">Todos</option>'+o;
+}
+
+/* Rascunho: protege o que já foi digitado contra F5 acidental. */
+const CAMPOS_FORM=['fPessoa','fDocumento','fEmpresa','fVeiculo','fPlaca','fEntrada','fSetor','fAutorizador','fObs'];
+function salvarRascunho(){
+  const d={}; CAMPOS_FORM.forEach(id=>d[id]=document.getElementById(id).value);
+  DB.rascunho=d; dbSalvar();
+}
+function restaurarRascunho(){
+  if(!DB.rascunho) return;
+  CAMPOS_FORM.forEach(id=>{ if(DB.rascunho[id]!=null) document.getElementById(id).value=DB.rascunho[id]; });
+}
+function limparFormulario(perguntar){
+  if(perguntar && !confirm('Apagar tudo o que foi digitado nesta tela?')) return;
+  CAMPOS_FORM.forEach(id=>document.getElementById(id).value='');
+  document.getElementById('fTermo').checked=false;
+  document.getElementById('boxTermo').classList.remove('ok');
+  limparErros();
+  DB.rascunho=null; dbSalvar();
+  agoraNoCampo('fEntrada');
+}
+
+function salvarEntrada(){
+  limparErros();
+  if(!DB.turno){ showToast('Comece o turno antes de registrar entradas.','error'); return; }
+
+  const pessoa      = document.getElementById('fPessoa').value.trim();
+  const documento   = document.getElementById('fDocumento').value.trim();
+  const empresa     = document.getElementById('fEmpresa').value.trim();
+  const veiculo     = document.getElementById('fVeiculo').value.trim();
+  const placa       = normalizarPlaca(document.getElementById('fPlaca').value);
+  const entradaIso  = fromInputDT(document.getElementById('fEntrada').value);
+  const setor       = document.getElementById('fSetor').value;
+  const autorizador = document.getElementById('fAutorizador').value.trim();
+  const obs         = document.getElementById('fObs').value.trim();
+  const termo       = document.getElementById('fTermo').checked;
+
+  /* ---- Validações ---- */
+  let erro=false, foco=null;
+  const falha=(campo,msg)=>{ marcarErro(campo,msg); erro=true; foco=foco||campo; };
+
+  if(pessoa.length<3)  falha('Pessoa','Escreva o nome de quem entrou.');
+  if(!empresa)         falha('Empresa','Escreva a empresa.');
+  if(!placa)           falha('Placa','Escreva a placa.');
+  else if(!placaValida(placa)) falha('Placa','Placa errada. Use ABC1D23 ou ABC1234.');
+  if(!setor)           falha('Setor','Escolha o setor que autorizou.');
+  if(autorizador.length<3) falha('Autorizador','Escreva quem autorizou.');
+  if(!entradaIso)      falha('Entrada','Informe o dia e a hora da entrada.');
+
+  /* Relógio: entrada no futuro quase sempre é erro de digitação. */
+  if(entradaIso && new Date(entradaIso)-new Date() > CONFIG.TOLERANCIA_FUTURO_MIN*60000)
+    falha('Entrada','A hora da entrada não pode ser depois de agora.');
+
+  if(erro){
+    const el=document.querySelector('#w'+foco+' input, #w'+foco+' select');
+    if(el){ el.focus(); el.scrollIntoView({block:'center',behavior:'smooth'}); }
+    showToast('Faltou preencher. Veja os campos em vermelho.','error');
+    return;
+  }
+  if(!termo){
+    const box=document.getElementById('boxTermo');
+    box.scrollIntoView({block:'center',behavior:'smooth'});
+    showToast('Toque no botão de confirmação antes de liberar.','error');
+    return;
+  }
+
+  /* Entrada muito retroativa: permitido, mas com confirmação explícita. */
+  const atrasoH=(new Date()-new Date(entradaIso))/3600000;
+  if(atrasoH>CONFIG.CONFIRMA_RETROATIVO_H &&
+     !confirm('A hora informada é de '+Math.floor(atrasoH)+'h atrás.\nEstá certo assim?')) return;
+
+  /* Duplicidade: mesma placa já dentro da unidade. */
+  const dup=DB.registros.find(r=>r.status==='aberto' && r.placa===placa);
+  if(dup && !confirm('A placa '+placaBonita(placa)+' JÁ ESTÁ DENTRO ('+dup.numero+' — '+dup.pessoa+
+                     ', entrou '+fmtDT(dup.entrada)+').\n\nRegistrar mesmo assim?')) return;
+
+  /* ---- Grava ---- */
+  const seq=proximoNumero(new Date(entradaIso));
+  const r={
+    id:uid(), numero:seq.numero, status:'aberto',
+    pessoa, documento, empresa, veiculo, placa,
+    entrada:entradaIso, saida:null,
+    setor, autorizador,
+    porteiroEntrada:DB.turno.porteiro, matriculaEntrada:DB.turno.matricula, turnoEntrada:DB.turno.turno,
+    porteiroSaida:null, matriculaSaida:null, turnoSaida:null,
+    observacoes:obs,
+    // Confirmação: quem, quando, qual termo e qual assinatura cadastrada.
+    confirmEntrada:{ nome:DB.turno.porteiro, matricula:DB.turno.matricula, ts:new Date().toISOString(),
+                     termo:CONFIG.TERMO_ENTRADA, assinId:DB.turno.assinId },
+    confirmSaida:null,
+    criadoEm:new Date().toISOString(),
+    auditoria:[]
+  };
+  auditar(r,'ENTRADA LIBERADA','Placa '+placaBonita(placa)+' · autorizado por '+setor+' / '+autorizador+
+                               (dup?' · ATENÇÃO: placa já estava dentro ('+dup.numero+')':''));
+  selar(r);
+
+  consumirNumero(seq.ano,seq.n);
+  DB.registros.push(r);
+  DB.rascunho=null;
+  if(!dbSalvar()) return;
+
+  limparFormulario(false);
+  renderTudo();
+  showToast('Entrada liberada — '+r.numero,'success');
+}
+
+/* ================================================================
+   9. SAÍDA
+   ================================================================ */
+function registrarSaida(id){
+  const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  if(!DB.turno){ showToast('Comece o turno para registrar a saída.','error'); return; }
+  const img=DB.assinaturas[DB.turno.assinId];
+
+  abrirModalCustom('Registrar saída — '+r.numero,
+    '<div class="warn-box i">'+
+      '<b>'+esc(r.pessoa)+'</b> — '+esc(r.empresa)+'<br>'+
+      'Placa <b>'+esc(placaBonita(r.placa))+'</b> · entrou em '+fmtDT(r.entrada)+
+    '</div>'+
+    '<div class="field" style="margin-bottom:14px">'+
+      '<label>Dia e hora da saída <span class="req">*</span></label>'+
+      '<input type="datetime-local" id="sData" value="'+toInputDT(new Date().toISOString())+'">'+
+    '</div>'+
+    '<div class="field" style="margin-bottom:18px">'+
+      '<label>Anotações da saída</label>'+
+      '<textarea id="sObs" placeholder="Alguma observação na saída? (opcional)"></textarea>'+
+    '</div>'+
+    (img?'<div class="assin-card"><img src="'+img+'" alt="assinatura"/>'+
+         '<div class="who"><div class="k">Porteiro do turno</div><div class="v">'+esc(DB.turno.porteiro)+
+         '</div><div class="t">'+esc(DB.turno.turno)+'</div></div></div>':'')+
+    '<div class="termo">'+esc(CONFIG.TERMO_SAIDA)+'</div>'+
+    '<label class="confirmar" id="sBoxTermo">'+
+      '<input type="checkbox" id="sTermo" onchange="document.getElementById(\'sBoxTermo\').classList.toggle(\'ok\',this.checked)">'+
+      '<span class="mark"></span>'+
+      '<span class="txt">Toque aqui para confirmar</span>'+
+    '</label>',
+    [{txt:'Cancelar',cls:'btn-outline',fn:fecharModal},
+     {txt:'CONFIRMAR SAÍDA',cls:'btn-green',fn:()=>confirmarSaida(id)}]);
+}
+
+function confirmarSaida(id){
+  const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  const saidaIso=fromInputDT(document.getElementById('sData').value);
+  const obs=document.getElementById('sObs').value.trim();
+  const termo=document.getElementById('sTermo').checked;
+
+  if(!saidaIso){ showToast('Informe o dia e a hora da saída.','error'); return; }
+  if(new Date(saidaIso) < new Date(r.entrada)){ showToast('A saída não pode ser antes da entrada ('+fmtDT(r.entrada)+').','error'); return; }
+  if(new Date(saidaIso)-new Date() > CONFIG.TOLERANCIA_FUTURO_MIN*60000){ showToast('A hora da saída não pode ser depois de agora.','error'); return; }
+  if(!termo){ showToast('Toque no botão de confirmação.','error'); return; }
+
+  r.saida=saidaIso;
+  r.status='concluido';
+  r.porteiroSaida=DB.turno.porteiro;
+  r.matriculaSaida=DB.turno.matricula;
+  r.turnoSaida=DB.turno.turno;
+  if(obs) r.observacoes=(r.observacoes?r.observacoes+'\n':'')+'[Saída] '+obs;
+  r.confirmSaida={ nome:DB.turno.porteiro, matricula:DB.turno.matricula, ts:new Date().toISOString(),
+                   termo:CONFIG.TERMO_SAIDA, assinId:DB.turno.assinId };
+  auditar(r,'SAÍDA REGISTRADA','Ficou dentro '+duracao(permanenciaMs(r))+(obs?' · '+obs:''));
+  selar(r);
+
+  if(!dbSalvar()) return;
+  fecharModal(); renderTudo();
+  showToast('Saída registrada — '+r.numero,'success');
+}
+
+/* Reabertura: registro concluído é travado; só volta a aberto com justificativa. */
+function reabrir(id){
+  const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  const j=prompt('Por que este registro precisa ser reaberto?\n(obrigatório — fica guardado no histórico)','');
+  if(j===null) return;
+  if(j.trim().length<10){ showToast('Escreva o motivo com mais detalhe.','error'); return; }
+  r.status='aberto'; r.saida=null; r.porteiroSaida=null; r.matriculaSaida=null; r.turnoSaida=null; r.confirmSaida=null;
+  auditar(r,'REGISTRO REABERTO',j.trim());
+  selar(r);
+  if(!dbSalvar()) return;
+  fecharModal(); renderTudo();
+  showToast('Registro '+r.numero+' reaberto.');
+}
+
+/* Edição de registro aberto — cada campo alterado vira uma linha de auditoria. */
+function editar(id){
+  const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  if(r.status!=='aberto'){ showToast('Reabra o registro para poder corrigir.','error'); return; }
+  const opts=CONFIG.SETORES.map(x=>'<option value="'+esc(x)+'"'+(x===r.setor?' selected':'')+'>'+esc(x)+'</option>').join('');
+  abrirModalCustom('Corrigir — '+r.numero,
+    '<div class="warn-box w">Toda correção fica guardada no histórico do registro, com dia, hora e nome de quem corrigiu.</div>'+
+    '<div class="g2" style="margin-bottom:14px">'+
+      inp('ePessoa','Nome de quem entrou',r.pessoa)+inp('eEmpresa','Empresa',r.empresa)+
+    '</div>'+
+    '<div class="g2" style="margin-bottom:14px">'+
+      inp('eDocumento','Documento',r.documento)+inp('eVeiculo','Modelo e cor do carro',r.veiculo)+
+    '</div>'+
+    '<div class="g2" style="margin-bottom:14px">'+
+      inp('ePlaca','Placa',r.placa)+
+      '<div class="field"><label>Dia e hora da entrada</label><input type="datetime-local" id="eEntrada" value="'+toInputDT(r.entrada)+'"></div>'+
+    '</div>'+
+    '<div class="g2" style="margin-bottom:14px">'+
+      '<div class="field"><label>Setor que autorizou</label><select id="eSetor">'+opts+'</select></div>'+
+      inp('eAutorizador','Nome de quem autorizou',r.autorizador)+
+    '</div>'+
+    '<div class="field"><label>Anotações</label><textarea id="eObs">'+esc(r.observacoes)+'</textarea></div>',
+    [{txt:'Cancelar',cls:'btn-outline',fn:()=>verRegistro(id)},
+     {txt:'Salvar correção',cls:'btn-red',fn:()=>salvarEdicao(id)}]);
+}
+
+function salvarEdicao(id){
+  const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  const novo={
+    pessoa:document.getElementById('ePessoa').value.trim(),
+    empresa:document.getElementById('eEmpresa').value.trim(),
+    documento:document.getElementById('eDocumento').value.trim(),
+    veiculo:document.getElementById('eVeiculo').value.trim(),
+    placa:normalizarPlaca(document.getElementById('ePlaca').value),
+    entrada:fromInputDT(document.getElementById('eEntrada').value),
+    setor:document.getElementById('eSetor').value,
+    autorizador:document.getElementById('eAutorizador').value.trim(),
+    observacoes:document.getElementById('eObs').value.trim()
+  };
+  if(novo.pessoa.length<3){ showToast('Escreva o nome de quem entrou.','error'); return; }
+  if(!novo.empresa){ showToast('Escreva a empresa.','error'); return; }
+  if(!placaValida(novo.placa)){ showToast('Placa errada.','error'); return; }
+  if(!novo.entrada){ showToast('Dia e hora da entrada inválidos.','error'); return; }
+  if(new Date(novo.entrada)-new Date() > CONFIG.TOLERANCIA_FUTURO_MIN*60000){ showToast('A hora da entrada não pode ser depois de agora.','error'); return; }
+
+  const rotulos={pessoa:'Nome',empresa:'Empresa',documento:'Documento',veiculo:'Carro',
+                 placa:'Placa',entrada:'Entrada',setor:'Setor',autorizador:'Autorizador',observacoes:'Anotações'};
+  const mudou=[];
+  Object.keys(novo).forEach(k=>{
+    const de=r[k]==null?'':String(r[k]), para=novo[k]==null?'':String(novo[k]);
+    if(de!==para){
+      mudou.push(rotulos[k]+': "'+(k==='entrada'?fmtDT(de):de||'—')+'" -> "'+(k==='entrada'?fmtDT(para):para||'—')+'"');
+      r[k]=novo[k];
+    }
+  });
+  if(!mudou.length){ showToast('Nada foi alterado.'); verRegistro(id); return; }
+
+  auditar(r,'REGISTRO CORRIGIDO',mudou.join(' · '));
+  selar(r);
+  if(!dbSalvar()) return;
+  renderTudo(); verRegistro(id);
+  showToast('Correção salva.','success');
+}
+
+function excluir(id){
+  const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  if(!confirm('APAGAR o registro '+r.numero+' para sempre?\n\nNão dá para desfazer.')) return;
+  const conf=prompt('Para confirmar, escreva o número do registro:','');
+  if(conf===null) return;
+  if(chave(conf)!==chave(r.numero)){ showToast('Número não confere. Nada foi apagado.','error'); return; }
+  DB.registros=DB.registros.filter(x=>x.id!==id);
+  if(!dbSalvar()) return;
+  fecharModal(); renderTudo();
+  showToast('Registro '+r.numero+' apagado.');
+}
+
+/* ================================================================
+   10. RENDERIZAÇÃO
+   ================================================================ */
+function irPara(aba){
+  ABA=aba;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('sel',t.dataset.pane===aba));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+aba));
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function cartaoRegistro(r){
+  const s=situacao(r);
+  const perm=duracao(permanenciaMs(r));
+  const tempoTxt = r.status==='aberto' ? 'Dentro há '+perm : 'Ficou '+perm;
+  const alerta = !integro(r) ? '<span class="bdg b-late" style="margin-left:8px">DADOS ALTERADOS</span>' : '';
+
+  const acoes = r.status==='aberto'
+    ? '<button class="btn btn-green btn-sm" onclick="event.stopPropagation();registrarSaida(\''+r.id+'\')">'+
+        '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>'+
+        'Registrar saída</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editar(\''+r.id+'\')">Corrigir</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();gerarDeclaracao(\''+r.id+'\')">Gerar PDF</button>'
+    : '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();gerarDeclaracao(\''+r.id+'\')">Gerar PDF</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();reabrir(\''+r.id+'\')">Reabrir</button>';
+
+  return '<div class="rec s-'+s+'" onclick="verRegistro(\''+r.id+'\')">'+
+    '<div class="rec-status"><span class="dot"></span>'+esc(ROTULO_SIT[s])+alerta+
+      '<span class="tempo">'+esc(tempoTxt)+'</span></div>'+
+    '<div class="rec-in">'+
+      '<div class="rec-top">'+
+        '<span class="bdg plate">'+esc(placaBonita(r.placa))+'</span>'+
+        '<span class="rec-nome">'+esc(r.pessoa)+'</span>'+
+        '<span class="rec-emp">'+esc(r.empresa)+'</span>'+
+        '<span class="rec-num" style="margin-left:auto">'+esc(r.numero)+'</span>'+
+      '</div>'+
+      '<div class="rec-grid">'+
+        cell('Entrou',fmtDT(r.entrada))+
+        cell('Saiu',r.saida?fmtDT(r.saida):'ainda dentro')+
+        cell('Autorizado por',r.setor+' — '+r.autorizador)+
+        cell('Porteiro',r.porteiroEntrada)+
+        (r.observacoes?cell('Anotações',r.observacoes):'')+
+      '</div>'+
+      '<div class="rec-acts">'+acoes+'</div>'+
+    '</div>'+
+  '</div>';
+}
+function cell(k,v){ return '<div><div class="k">'+esc(k)+'</div><div class="v">'+esc(v||'—')+'</div></div>'; }
+function kvItem(k,v){ return '<div><div class="k">'+esc(k)+'</div><div class="v">'+esc(v||'—')+'</div></div>'; }
+function inp(id,lab,val){ return '<div class="field"><label>'+esc(lab)+'</label><input type="text" id="'+id+'" value="'+esc(val)+'"></div>'; }
+
+function casa(r,q){
+  if(!q) return true;
+  const t=chave(q);
+  return [r.numero,r.pessoa,r.empresa,r.placa,placaBonita(r.placa),r.autorizador,r.setor,
+          r.porteiroEntrada,r.porteiroSaida,r.documento,r.veiculo,r.observacoes]
+         .some(v=>chave(v).includes(t));
+}
+
+function filtroRapido(f){ FILTRO_ABERTOS=f; renderAbertos(); }
+
+function renderAbertos(){
+  const q=document.getElementById('buscaAbertos').value;
+  const dentro=DB.registros.filter(r=>r.status==='aberto');
+  const cont={ in:0, warn:0, late:0 };
+  dentro.forEach(r=>cont[situacao(r)]++);
+
+  // Painel resumo: números grandes e coloridos, clicáveis como filtro.
+  document.getElementById('resumoAbertos').innerHTML=
+    tileHtml('','t-all',dentro.length,'Total dentro')+
+    tileHtml('in','t-in',cont.in,'Tudo normal')+
+    tileHtml('warn','t-warn',cont.warn,'Verificar')+
+    tileHtml('late','t-late',cont.late,'Resolver');
+
+  const lista=dentro.filter(r=>(!FILTRO_ABERTOS||situacao(r)===FILTRO_ABERTOS) && casa(r,q))
+                    .sort((a,b)=>new Date(a.entrada)-new Date(b.entrada));  // mais antigos primeiro
+  const el=document.getElementById('listaAbertos');
+  el.innerHTML = lista.length
+    ? lista.map(r=>cartaoRegistro(r)).join('')
+    : '<div class="empty-state">'+((q||FILTRO_ABERTOS)?'Nada encontrado com esse filtro.':'Nenhum carro dentro da unidade agora.')+'</div>';
+  document.getElementById('pillAbertos').textContent=lista.length+' de '+dentro.length;
+}
+function tileHtml(f,cls,n,lab){
+  return '<button type="button" class="tile '+cls+(FILTRO_ABERTOS===f?' sel':'')+'" onclick="filtroRapido(\''+f+'\')">'+
+           '<div class="num">'+n+'</div><div class="lab">'+esc(lab)+'</div></button>';
+}
+
+function renderConcluidos(){
+  const q=document.getElementById('buscaConcluidos').value;
+  const lista=DB.registros.filter(r=>r.status==='concluido' && casa(r,q))
+                          .sort((a,b)=>new Date(b.saida||b.entrada)-new Date(a.saida||a.entrada));
+  const el=document.getElementById('listaConcluidos');
+  el.innerHTML = lista.length
+    ? lista.map(r=>cartaoRegistro(r)).join('')
+    : '<div class="empty-state">'+(q?'Nada encontrado com esse filtro.':'Nenhum carro saiu ainda.')+'</div>';
+  document.getElementById('pillConcluidos').textContent=lista.length+' registro(s)';
+}
+
+/* Histórico: mesma filtragem usada na tabela e na exportação CSV. */
+function filtrarHistorico(){
+  const q=document.getElementById('hBusca').value;
+  const de=document.getElementById('hDe').value;
+  const ate=document.getElementById('hAte').value;
+  const st=document.getElementById('hStatus').value;
+  const se=document.getElementById('hSetor').value;
+  const dDe = de? new Date(de+'T00:00:00') : null;
+  const dAte= ate? new Date(ate+'T23:59:59') : null;
+  return DB.registros.filter(r=>{
+    if(st && r.status!==st) return false;
+    if(se && r.setor!==se) return false;
+    if(!casa(r,q)) return false;
+    const e=new Date(r.entrada);
+    if(dDe && e<dDe) return false;
+    if(dAte && e>dAte) return false;
+    return true;
+  }).sort((a,b)=>new Date(b.entrada)-new Date(a.entrada));
+}
+
+function renderHistorico(){
+  const lista=filtrarHistorico();
+  const tb=document.getElementById('tbHistorico');
+  tb.innerHTML = lista.length ? lista.map(r=>{
+    const s=situacao(r);
+    const viol = integro(r)?'':' <span class="bdg b-late">!</span>';
+    return '<tr class="l-'+s+'" onclick="verRegistro(\''+r.id+'\')">'+
+      '<td class="mono">'+esc(r.numero)+viol+'</td>'+
+      '<td>'+esc(r.pessoa)+'</td>'+
+      '<td>'+esc(r.empresa)+'</td>'+
+      '<td class="mono">'+esc(placaBonita(r.placa))+'</td>'+
+      '<td>'+fmtDT(r.entrada)+'</td>'+
+      '<td>'+(r.saida?fmtDT(r.saida):'—')+'</td>'+
+      '<td>'+duracao(permanenciaMs(r))+'</td>'+
+      '<td>'+esc(r.setor)+'<br><span style="color:var(--muted)">'+esc(r.autorizador)+'</span></td>'+
+      '<td>'+esc(r.porteiroEntrada)+(r.porteiroSaida&&r.porteiroSaida!==r.porteiroEntrada?'<br><span style="color:var(--muted)">saída: '+esc(r.porteiroSaida)+'</span>':'')+'</td>'+
+      '<td><span class="bdg b-'+s+'">'+esc(ROTULO_SIT[s])+'</span></td>'+
+    '</tr>';
+  }).join('') : '<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:28px">Nada encontrado com esses filtros.</td></tr>';
+
+  const abertos=lista.filter(r=>r.status==='aberto').length;
+  const concl=lista.length-abertos;
+  const fechados=lista.filter(r=>r.status==='concluido');
+  const media=concl? fechados.reduce((s,r)=>s+permanenciaMs(r),0)/concl : null;
+  document.getElementById('sumHistorico').innerHTML=
+    '<span>Mostrando <b>'+lista.length+'</b> de <b>'+DB.registros.length+'</b> registros</span>'+
+    '<span>Ainda dentro: <b>'+abertos+'</b></span>'+
+    '<span>Já saíram: <b>'+concl+'</b></span>'+
+    '<span>Tempo médio dentro: <b>'+(media!=null?duracao(media):'—')+'</b></span>';
+}
+
+function renderContadores(){
+  const dentro=DB.registros.filter(r=>r.status==='aberto');
+  const pior = dentro.some(r=>situacao(r)==='late') ? 'late'
+             : dentro.some(r=>situacao(r)==='warn') ? 'warn'
+             : dentro.length ? 'in' : 'zero';
+  const a=document.getElementById('nAbertos');
+  a.textContent=dentro.length; a.className='n '+pior;
+  const c=document.getElementById('nConcluidos');
+  const nc=DB.registros.length-dentro.length;
+  c.textContent=nc; c.className='n '+(nc?'out':'zero');
+  const t=document.getElementById('nTotal');
+  t.textContent=DB.registros.length; t.className='n '+(DB.registros.length?'':'zero');
+}
+
+function renderDatalists(){
+  const uniq=f=>[...new Set(DB.registros.map(f).filter(Boolean))].sort();
+  const fill=(id,arr)=>document.getElementById(id).innerHTML=arr.map(v=>'<option value="'+esc(v)+'">').join('');
+  fill('dlPessoas',uniq(r=>r.pessoa));
+  fill('dlEmpresas',uniq(r=>r.empresa));
+  fill('dlAutorizadores',uniq(r=>r.autorizador));
+}
+
+function renderEspaco(){
+  let bytes=0;
+  try{ bytes=(localStorage.getItem(CONFIG.DB_KEY)||'').length*2; }catch(e){}
+  const kb=Math.round(bytes/1024);
+  const pct=Math.min(100,Math.round(kb/5120*100));
+  document.getElementById('usoEspaco').innerHTML=
+    '<span>Espaço usado: <b>'+kb+' KB</b> (cerca de '+pct+'% do limite do navegador)</span>'+
+    '<span>Registros guardados: <b>'+DB.registros.length+'</b></span>'+
+    '<span>Porteiros cadastrados: <b>'+DB.porteiros.length+'</b></span>';
+}
+
+function renderTudo(){
+  renderContadores(); renderAbertos(); renderConcluidos(); renderHistorico();
+  renderPorteiros(); renderDatalists(); renderEspaco();
+}
+
+/* ================================================================
+   11. MODAL
+   ================================================================ */
+function abrirModalCustom(titulo,html,botoes){
+  document.getElementById('modalTitulo').textContent=titulo;
+  document.getElementById('modalBody').innerHTML=html;
+  const foot=document.getElementById('modalFoot');
+  foot.innerHTML='';
+  (botoes||[]).forEach(b=>{
+    const btn=document.createElement('button');
+    btn.type='button'; btn.className='btn '+(b.cls||'btn-outline'); btn.textContent=b.txt;
+    btn.onclick=b.fn; foot.appendChild(btn);
+  });
+  document.getElementById('modal').hidden=false;
+}
+function fecharModal(){ document.getElementById('modal').hidden=true; MODAL_ID=null; PAD=null; }
+
+function verRegistro(id){
+  const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  MODAL_ID=id;
+  const s=situacao(r);
+  const caixa={in:'i',warn:'w',late:'e',out:'g'}[s];
+
+  let avisos='<div class="warn-box '+caixa+'"><b>'+esc(ROTULO_SIT[s].toUpperCase())+'</b> — '+
+             (r.status==='aberto'?'dentro há ':'ficou ')+duracao(permanenciaMs(r))+'.</div>';
+  if(!integro(r)) avisos+='<div class="warn-box e">Este registro foi alterado por fora do sistema. Não confie nos dados sem conferir o histórico abaixo.</div>';
+
+  const html = avisos+
+    '<div class="sec-title">Quem entrou e com qual carro</div>'+
+    '<div class="kv">'+
+      kvItem('Número do registro',r.numero)+kvItem('Nome',r.pessoa)+
+      kvItem('Empresa',r.empresa)+kvItem('Documento',r.documento)+
+      kvItem('Placa',placaBonita(r.placa))+kvItem('Carro',r.veiculo)+
+    '</div>'+
+    '<div class="sec-title">Entrada e saída</div>'+
+    '<div class="kv">'+
+      kvItem('Entrou em',fmtDT(r.entrada))+kvItem('Saiu em',r.saida?fmtDT(r.saida):'ainda dentro')+
+      kvItem('Tempo dentro',duracao(permanenciaMs(r)))+
+    '</div>'+
+    '<div class="sec-title">Autorização e responsáveis</div>'+
+    '<div class="kv">'+
+      kvItem('Setor que autorizou',r.setor)+kvItem('Autorizado por',r.autorizador)+
+      kvItem('Porteiro na entrada',r.porteiroEntrada+(r.matriculaEntrada?' (mat. '+r.matriculaEntrada+')':''))+
+      kvItem('Turno da entrada',r.turnoEntrada)+
+      kvItem('Porteiro na saída',r.porteiroSaida?(r.porteiroSaida+(r.matriculaSaida?' (mat. '+r.matriculaSaida+')':'')):'')+
+      kvItem('Turno da saída',r.turnoSaida)+
+    '</div>'+
+    (r.observacoes?'<div class="sec-title">Anotações</div><div style="font-size:14px;white-space:pre-line;line-height:1.55">'+esc(r.observacoes)+'</div>':'')+
+    '<div class="sec-title">Confirmações do porteiro</div>'+
+    blocoConfirm('Entrada',r.confirmEntrada)+
+    blocoConfirm('Saída',r.confirmSaida)+
+    '<div class="sec-title">Histórico do registro</div>'+
+    '<ul class="audit">'+(r.auditoria||[]).map(a=>
+      '<li><span class="ts">'+fmtDT(a.ts)+'</span> — <b>'+esc(a.evento)+'</b>'+
+      (a.detalhe?'<br>'+esc(a.detalhe):'')+
+      '<br><span style="font-size:11.5px">por '+esc(a.autor)+'</span></li>').join('')+'</ul>';
+
+  const acoes=[];
+  acoes.push({txt:'Gerar PDF',cls:'btn-outline',fn:()=>gerarDeclaracao(id)});
+  if(r.status==='aberto'){
+    acoes.push({txt:'Corrigir',cls:'btn-outline',fn:()=>editar(id)});
+    acoes.push({txt:'Registrar saída',cls:'btn-green',fn:()=>registrarSaida(id)});
+  }else{
+    acoes.push({txt:'Reabrir',cls:'btn-outline',fn:()=>reabrir(id)});
+  }
+  acoes.push({txt:'Apagar',cls:'btn-red',fn:()=>excluir(id)});
+  acoes.push({txt:'Fechar',cls:'btn-dark',fn:fecharModal});
+
+  abrirModalCustom('Registro '+r.numero,html,acoes);
+}
+
+function blocoConfirm(qual,c){
+  if(!c) return '<div style="font-size:13.5px;color:var(--muted);margin-bottom:10px"><b>'+qual+':</b> ainda não confirmada.</div>';
+  const img=(DB.assinaturas||{})[c.assinId];
+  return '<div class="assin-card" style="align-items:flex-start">'+
+    (img?'<img src="'+img+'" alt="assinatura"/>':'')+
+    '<div class="who">'+
+      '<div class="k">Confirmação da '+esc(qual.toLowerCase())+'</div>'+
+      '<div class="v">'+esc(c.nome)+'</div>'+
+      '<div class="t">'+fmtDT(c.ts)+'</div>'+
+      '<div class="t" style="margin-top:6px;font-style:italic;line-height:1.45">"'+esc(c.termo)+'"</div>'+
+    '</div>'+
+  '</div>';
+}
+
+/* ================================================================
+   12. DECLARAÇÃO DE AUTORIZAÇÃO DE ENTRADA (PDF)
+   ----------------------------------------------------------------
+   A logo vem de logo.js (window.LOGO_B64). Se por algum motivo o
+   arquivo não estiver junto, tenta ler o PNG pelo canvas — o que só
+   funciona quando a página é servida por http(s).
+   ================================================================ */
+function carregarLogo(){
+  const img=document.getElementById('logoImg');
+  // Cabeçalho da tela: se o PNG não abrir, usa a versão embutida.
+  const fallback=function(){ if(window.LOGO_B64) img.src=window.LOGO_B64; else img.style.display='none'; };
+  img.onerror=fallback;
+  // O erro pode ter acontecido antes deste ponto — nesse caso onerror não dispara mais.
+  if(img.complete && img.naturalWidth===0) fallback();
+
+  if(window.LOGO_B64||!CONFIG.LOGO_URL) return;
+  const im=new Image(); im.crossOrigin='anonymous';
+  im.onload=function(){
+    try{
+      const cv=document.createElement('canvas');
+      cv.width=im.naturalWidth; cv.height=im.naturalHeight;
+      cv.getContext('2d').drawImage(im,0,0);
+      window.LOGO_B64=cv.toDataURL('image/png');
+    }catch(e){}
+  };
+  im.src=CONFIG.LOGO_URL;
+}
+
+function gerarDeclaracao(id){
+  const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  if(!window.jspdf||!window.jspdf.jsPDF){ showToast('Não consegui gerar o PDF (sem internet para carregar a ferramenta).','error'); return; }
+
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
+  const W=210,H=297,ML=14,MR=14,CW=W-ML-MR;
+  const DARK=[26,18,16],GRAY=[135,130,125],RED=[192,57,43],LGRAY=[224,219,213];
+  const setC=c=>doc.setTextColor(...c), setD=c=>doc.setDrawColor(...c);
+  const logoB64=window.LOGO_B64||'';
+
+  function header(){
+    if(logoB64){ try{ doc.addImage(logoB64,'PNG',ML,4,40,11); }catch(e){} }
+    setD(RED); doc.setLineWidth(0.8); doc.line(0,19,W,19);
+    doc.setFontSize(12); doc.setFont('helvetica','bold'); setC(DARK);
+    doc.text('DECLARAÇÃO DE AUTORIZAÇÃO DE ENTRADA',W-MR,10,{align:'right'});
+    doc.setFontSize(7.5); doc.setFont('helvetica','normal'); setC(GRAY);
+    doc.text(r.numero+'  •  emitida em '+fmtDT(new Date().toISOString()),W-MR,15.5,{align:'right'});
+  }
+  function footer(){
+    const pg=doc.internal.getCurrentPageInfo().pageNumber, tot=doc.internal.getNumberOfPages();
+    doc.setFontSize(6.5); doc.setFont('helvetica','italic'); setC([170,165,160]);
+    doc.text('Perpec Oilfield Supply  •  '+CONFIG.DOC_REF+'  •  Controle de Entrada de Veículos',W/2,H-7,{align:'center'});
+    doc.setFont('helvetica','normal');
+    doc.text('Página '+pg+' de '+tot,W-MR,H-7,{align:'right'});
+  }
+
+  header();
+  let y=26;
+
+  // ---- Texto de abertura ----
+  doc.setFontSize(9.5); doc.setFont('helvetica','normal'); setC(DARK);
+  const abertura='A Perpec Oilfield Supply declara, para os devidos fins, que a entrada da pessoa e do veículo '+
+    'abaixo identificados nas dependências da unidade foi previamente autorizada pelo setor responsável, '+
+    'conforme registro de portaria nº '+r.numero+', e conferida pelo porteiro do turno indicado neste documento.';
+  const linhas=doc.splitTextToSize(abertura,CW);
+  doc.text(linhas,ML,y); y+=linhas.length*4.6+5;
+
+  // ---- Tabelas de dados ----
+  function tabela(titulo,dados){
+    doc.autoTable({
+      startY:y, margin:{left:ML,right:MR,top:24,bottom:16},
+      head:[[{content:titulo,colSpan:2,styles:{halign:'left',fillColor:DARK,textColor:[240,230,228],fontSize:7.5,fontStyle:'bold'}}]],
+      body:dados.map(l=>[l[0],l[1]||'—']),
+      styles:{fontSize:9,cellPadding:2.2,lineColor:LGRAY,lineWidth:0.1,valign:'top',overflow:'linebreak'},
+      columnStyles:{0:{cellWidth:52,fontStyle:'bold',textColor:GRAY},1:{cellWidth:CW-52,textColor:DARK}},
+      didDrawPage:()=>{ footer(); }
+    });
+    y=doc.lastAutoTable.finalY+4;
+  }
+
+  tabela('QUEM ENTROU E COM QUAL VEÍCULO',[
+    ['Nome',      r.pessoa],
+    ['Documento', r.documento],
+    ['Empresa',   r.empresa],
+    ['Placa',     placaBonita(r.placa)],
+    ['Veículo',   r.veiculo]
+  ]);
+
+  tabela('ENTRADA E SAÍDA',[
+    ['Entrou em',    fmtDT(r.entrada)],
+    ['Saiu em',      r.saida?fmtDT(r.saida):'Ainda dentro da unidade'],
+    ['Tempo dentro', duracao(permanenciaMs(r))]
+  ]);
+
+  const porteiroTxt=(nome,mat,turno)=>
+    nome ? nome+(mat?'  —  matrícula '+mat:'')+(turno?'  ('+turno+')':'') : '—';
+  tabela('AUTORIZAÇÃO',[
+    ['Setor que autorizou', r.setor],
+    ['Autorizado por',      r.autorizador],
+    ['Porteiro na entrada', porteiroTxt(r.porteiroEntrada,r.matriculaEntrada,r.turnoEntrada)],
+    ['Porteiro na saída',   porteiroTxt(r.porteiroSaida,r.matriculaSaida,r.turnoSaida)]
+  ]);
+
+  if(r.observacoes) tabela('ANOTAÇÕES DA PORTARIA',[['Observações', r.observacoes]]);
+
+  // ---- Termos confirmados, com a assinatura desenhada ----
+  function termoPDF(titulo,c){
+    if(!c) return;
+    const img=(DB.assinaturas||{})[c.assinId];
+    const alturaBloco = 20 + (img?20:0);
+    if(y>H-alturaBloco-24){ doc.addPage(); header(); y=26; }
+
+    doc.setFontSize(7.5); doc.setFont('helvetica','bold'); setC(RED);
+    doc.text(titulo,ML,y); y+=2;
+    setD(LGRAY); doc.setLineWidth(0.3); doc.line(ML,y,ML+CW,y); y+=4.5;
+
+    doc.setFontSize(8.5); doc.setFont('helvetica','italic'); setC(DARK);
+    const tl=doc.splitTextToSize(c.termo,CW);
+    doc.text(tl,ML,y); y+=tl.length*4+2;
+
+    const quem=c.nome+(c.matricula?'  —  matrícula '+c.matricula:'');
+    if(img){
+      try{ doc.addImage(img,'PNG',ML,y,52,15.8); }catch(e){}
+      setD([120,115,110]); doc.setLineWidth(0.3); doc.line(ML,y+16.5,ML+52,y+16.5);
+      doc.setFontSize(8); doc.setFont('helvetica','bold'); setC(DARK);
+      doc.text(quem,ML+56,y+11);
+      doc.setFontSize(7); doc.setFont('helvetica','normal'); setC(GRAY);
+      doc.text('Confirmado em '+fmtDT(c.ts),ML+56,y+15.5);
+      y+=21;
+    }else{
+      doc.setFontSize(8); doc.setFont('helvetica','normal'); setC(GRAY);
+      doc.text('Confirmado por '+quem+' em '+fmtDT(c.ts)+'.',ML,y); y+=6;
+    }
+    y+=3;
+  }
+  termoPDF('CONFERÊNCIA NA ENTRADA', r.confirmEntrada);
+  termoPDF('CONFERÊNCIA NA SAÍDA',   r.confirmSaida);
+
+  // ---- Selo de integridade ----
+  doc.setFontSize(6.5); doc.setFont('helvetica','italic'); setC(GRAY);
+  doc.text('Documento gerado eletronicamente pelo sistema de portaria. Selo de integridade do registro: '+
+           r.selo+(integro(r)?'':'  (CONFERÊNCIA FALHOU)'),ML,H-13);
+
+  const tot=doc.internal.getNumberOfPages();
+  for(let i=1;i<=tot;i++){ doc.setPage(i); header(); footer(); }
+
+  doc.save('Declaracao-Entrada-'+r.numero+'.pdf');
+
+  auditar(r,'PDF GERADO','Declaração de autorização de entrada.');
+  selar(r); dbSalvar();
+  if(MODAL_ID===id) verRegistro(id); else renderTudo();
+  showToast('PDF gerado. Veja a pasta de downloads.','success');
+}
+
+/* ================================================================
+   13. BACKUP / EXPORTAÇÃO
+   ================================================================ */
+function baixarArquivo(nome,conteudo,mime){
+  const blob=new Blob([conteudo],{type:mime});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=nome; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+
+function exportarCSV(){
+  const lista=filtrarHistorico();
+  if(!lista.length){ showToast('Não há nada para exportar com esses filtros.','error'); return; }
+  const cab=['Registro','Nome','Documento','Empresa','Placa','Veiculo','Entrou','Saiu','Tempo dentro',
+             'Setor que autorizou','Autorizado por','Matricula entrada','Porteiro entrada','Turno entrada',
+             'Matricula saida','Porteiro saida','Turno saida','Situacao','Anotacoes','Selo','Conferencia'];
+  const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
+  const linhas=lista.map(r=>[r.numero,r.pessoa,r.documento,r.empresa,placaBonita(r.placa),r.veiculo,
+    fmtDT(r.entrada), r.saida?fmtDT(r.saida):'', duracao(permanenciaMs(r)),
+    r.setor,r.autorizador,r.matriculaEntrada||'',r.porteiroEntrada,r.turnoEntrada,
+    r.matriculaSaida||'',r.porteiroSaida||'',r.turnoSaida||'',
+    ROTULO_SIT[situacao(r)], r.observacoes, r.selo, integro(r)?'OK':'ALTERADO'].map(q).join(';'));
+  // BOM + separador ";" para o Excel em português abrir direto.
+  baixarArquivo('Portaria-Historico-'+new Date().toISOString().slice(0,10)+'.csv',
+                '\uFEFF'+cab.map(q).join(';')+'\r\n'+linhas.join('\r\n'),
+                'text/csv;charset=utf-8');
+  showToast(lista.length+' registro(s) exportados.','success');
+}
+
+function exportarBackup(){
+  baixarArquivo('Portaria-Backup-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.json',
+                JSON.stringify(DB,null,2),'application/json');
+  showToast('Cópia de segurança salva na pasta de downloads.','success');
+}
+
+function importarBackup(input){
+  const f=input.files&&input.files[0];
+  input.value='';
+  if(!f) return;
+  const fr=new FileReader();
+  fr.onload=()=>{
+    let o;
+    try{ o=JSON.parse(fr.result); }
+    catch(e){ showToast('Arquivo inválido.','error'); return; }
+    if(!o||!Array.isArray(o.registros)){ showToast('Este arquivo não é uma cópia da portaria.','error'); return; }
+
+    // Mescla por número do registro: o que já existe é preservado.
+    const existentes=new Set(DB.registros.map(r=>r.numero));
+    const novos=o.registros.filter(r=>r&&r.numero&&!existentes.has(r.numero));
+    if(!confirm('A cópia tem '+o.registros.length+' registro(s).\n'+
+                novos.length+' serão acrescentados; '+(o.registros.length-novos.length)+
+                ' já existem e serão ignorados.\n\nContinuar?')) return;
+
+    // Traz junto as assinaturas e os porteiros que ainda não existem aqui.
+    Object.assign(DB.assinaturas, o.assinaturas||{});
+    const jaTem=new Set(DB.porteiros.map(p=>p.matricula));
+    (o.porteiros||[]).forEach(p=>{ if(p&&p.matricula&&!jaTem.has(String(p.matricula))) DB.porteiros.push(p); });
+    novos.forEach(r=>{
+      r.id=r.id||uid();
+      r.auditoria=r.auditoria||[];
+      DB.registros.push(r);
+      const m=/^.+-(\d{4})-(\d+)$/.exec(r.numero);
+      if(m) consumirNumero(m[1],parseInt(m[2],10));
+    });
+    if(!dbSalvar()) return;
+    renderTudo();
+    showToast(novos.length+' registro(s) restaurados.','success');
+  };
+  fr.onerror=()=>showToast('Não consegui ler o arquivo.','error');
+  fr.readAsText(f);
+}
+
+/* ================================================================
+   14. INICIALIZAÇÃO
+   ================================================================ */
+function relogio(){
+  const d=new Date();
+  document.getElementById('hdrRelogio').textContent=
+    p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear()+'  '+p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());
+}
+
+window.addEventListener('DOMContentLoaded',()=>{
+  DB=dbCarregar();
+
+  document.getElementById('hdrDoc').textContent=CONFIG.DOC_REF;
+  document.getElementById('ftDoc').textContent=CONFIG.DOC_REF;
+  document.getElementById('txtTermoEntrada').textContent=CONFIG.TERMO_ENTRADA;
+  document.getElementById('lgH1').textContent=CONFIG.ALERTA_PERMANENCIA_H;
+  document.getElementById('lgH2').textContent=CONFIG.CRITICO_PERMANENCIA_H;
+
+  carregarLogo();
+  preencherSelects();
+  renderTurno();
+  restaurarRascunho();
+  if(!document.getElementById('fEntrada').value) agoraNoCampo('fEntrada');
+  renderTudo();
+
+  CAMPOS_FORM.forEach(id=>document.getElementById(id).addEventListener('input',salvarRascunho));
+
+  relogio(); setInterval(relogio,1000);
+  // Mantém o semáforo de permanência atualizado sem recarregar a página.
+  setInterval(()=>{ renderContadores(); renderAbertos(); renderHistorico(); },60000);
+
+  // Outra aba do mesmo navegador gravou: recarrega para não trabalhar em cima de dados velhos.
+  window.addEventListener('storage',ev=>{
+    if(ev.key!==CONFIG.DB_KEY) return;
+    DB=dbCarregar(); renderTurno(); renderTudo();
+    showToast('Dados atualizados por outra aba.');
+  });
+
+  document.addEventListener('keydown',ev=>{
+    if(ev.key==='Escape' && !document.getElementById('modal').hidden) fecharModal();
+  });
+
+  const violados=DB.registros.filter(r=>!integro(r)).length;
+  if(violados) showToast(violados+' registro(s) foram alterados por fora do sistema. Confira o histórico.','error');
+});
+
+// Avisa antes de fechar com turno aberto e carros ainda dentro.
+window.addEventListener('beforeunload',ev=>{
+  if(DB && DB.turno && DB.registros.some(r=>r.status==='aberto')){
+    ev.preventDefault(); ev.returnValue='';
+  }
+});
+</script>
+</body>
+</html>
