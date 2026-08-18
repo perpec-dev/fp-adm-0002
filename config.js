@@ -15,7 +15,7 @@
    as regras de segurança e jamais deve sair do servidor.
    ============================================================ */
 window.SUPABASE_CONFIG = {
-  SUPABASE_URL:      "https://SEU-PROJETO.supabase.co",
+  SUPABASE_URL:      "https://aqvyuzccvmlcchtznypt.supabase.co/rest/v1/",
   SUPABASE_ANON_KEY: "COLE-AQUI-A-CHAVE-ANON",
 
   // Domínio interno usado para transformar a matrícula em e-mail de login.
