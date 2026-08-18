@@ -34,6 +34,15 @@ window.PORTARIA = (function(){
   const soNumero = v => String(v||'').replace(/\D/g,'').slice(0,10);
   const emailDe  = mat => soNumero(mat) + '@' + (CFG.DOMINIO_LOGIN||'portaria.perpec.local');
 
+  /* O Supabase autentica por e-mail. Quem digita matrícula tem o e-mail
+     interno montado aqui; quem tem e-mail de verdade (o gestor, por
+     exemplo) usa o próprio. Os dois convivem no mesmo campo. */
+  const ehEmail = v => /@/.test(String(v||''));
+  function loginParaEmail(v){
+    const s=String(v||'').trim();
+    return ehEmail(s) ? s.toLowerCase() : emailDe(s);
+  }
+
   function avisar(){
     ouvintes.forEach(fn=>{ try{ fn({estado, perfil, pendentes:fila().length, erro:ultimoErro}); }catch(e){} });
   }
@@ -94,6 +103,9 @@ window.PORTARIA = (function(){
     return { id:p.id, matricula:p.matricula, nome:p.nome, papel:p.papel,
              assinatura:p.assinatura||'', ativo:!!p.ativo, criadoEm:p.criado_em };
   }
+  // Não inclui login_email de propósito: assim o app funciona com o banco
+  // criado antes dessa coluna existir. Quem autentica é o auth.users.
+  const COLUNAS_PERFIL='id,matricula,nome,papel,assinatura,ativo,criado_em';
 
   /* A biblioteca já acrescenta /rest/v1, /auth/v1 etc. Se alguém colar a
      URL com esse caminho no fim, tira aqui em vez de quebrar tudo depois. */
@@ -147,7 +159,7 @@ window.PORTARIA = (function(){
     const { data:u } = await sb.auth.getUser();
     if(!u || !u.user){ perfil=null; return false; }
     const { data, error } = await sb.from('perfis')
-      .select('id,matricula,nome,papel,assinatura,ativo,criado_em')
+      .select(COLUNAS_PERFIL)
       .eq('id', u.user.id).maybeSingle();
     if(error || !data){
       // Usuário existe no Auth mas não tem cadastro liberado.
@@ -165,21 +177,52 @@ window.PORTARIA = (function(){
     return true;
   }
 
-  async function entrar(matricula, senha){
+  async function entrar(identificador, senha){
     if(!sb) throw new Error('Conexão não configurada.');
-    const mat = soNumero(matricula);
-    if(!mat)   throw new Error('Informe a matrícula.');
+    const id = String(identificador||'').trim();
+    if(!id)    throw new Error('Informe a matrícula ou o e-mail.');
+    if(!ehEmail(id) && !soNumero(id)) throw new Error('Informe a matrícula (só números) ou o e-mail completo.');
     if(!senha) throw new Error('Informe a senha.');
 
-    const { error } = await sb.auth.signInWithPassword({ email:emailDe(mat), password:senha });
+    const login = loginParaEmail(id);
+    const { error } = await sb.auth.signInWithPassword({ email:login, password:senha });
     if(error){
-      // Mensagem genérica de propósito: não revela se a matrícula existe.
-      throw new Error('Matrícula ou senha incorreta.');
+      const m = String(error.message||'');
+      const cod = String(error.code||'');
+
+      // Credencial errada mesmo: mensagem genérica de propósito, para não
+      // revelar a quem tentar adivinhar se a matrícula existe.
+      if(/invalid.*credential|invalid login/i.test(m) || cod==='invalid_credentials')
+        throw new Error(ehEmail(id) ? 'E-mail ou senha incorreta.' : 'Matrícula ou senha incorreta.');
+
+      if(/invalid api key/i.test(m))
+        throw new Error('A chave ou o endereço no config.js estão errados.\n'+
+                        'Confira se SUPABASE_URL é só https://SEU-PROJETO.supabase.co, sem "/rest/v1/".');
+
+      // Os demais são erros de INSTALAÇÃO. Esconder atrapalha e não protege nada.
+      if(/email not confirmed|not_confirmed/i.test(m))
+        throw new Error('O usuário existe, mas está marcado como não confirmado.\n'+
+                        'Desligue "Confirm email" em Authentication → Providers → Email e '+
+                        'confirme o usuário em Authentication → Users.');
+      if(/email.*(invalid|not valid)|invalid.*email/i.test(m))
+        throw new Error('O Supabase recusou o e-mail "'+login+'".\n'+
+                        (ehEmail(id) ? 'Confira se está escrito corretamente.'
+                                     : 'Troque DOMINIO_LOGIN no config.js por um domínio comum '+
+                                       '(ex.: portaria.perpec.com.br) e recadastre os usuários com esse domínio.'));
+      if(/disabled|not enabled|signups?/i.test(m))
+        throw new Error('O login por e-mail/senha está desligado no projeto.\n'+
+                        'Ligue em Authentication → Providers → Email.');
+
+      throw new Error('Não consegui entrar: '+m+(cod?'  ['+cod+']':''));
     }
     const ok = await carregarPerfil();
     if(!ok) throw new Error(ultimoErro||'Não foi possível entrar.');
     return perfil;
   }
+
+  /* Usado pela tela para mostrar exatamente qual e-mail está sendo tentado —
+     é a checagem mais rápida contra erro de digitação no cadastro. */
+  function emailDeMatricula(v){ return loginParaEmail(v); }
 
   async function sair(){
     if(fila().length && !confirm('Ainda há '+fila().length+' registro(s) esperando envio.\nSair mesmo assim?')) return false;
@@ -203,7 +246,7 @@ window.PORTARIA = (function(){
     try{
       const [reg, pfs] = await Promise.all([
         sb.from('registros').select(COLUNAS).order('entrada',{ascending:false}).limit(5000),
-        sb.from('perfis').select('id,matricula,nome,papel,assinatura,ativo,criado_em').order('matricula')
+        sb.from('perfis').select(COLUNAS_PERFIL).order('matricula')
       ]);
       if(reg.error) throw reg.error;
       if(pfs.error) throw pfs.error;
@@ -345,7 +388,7 @@ window.PORTARIA = (function(){
   }
 
   /* ---------------- perfis (gestor) ---------------- */
-  async function criarPorteiro({matricula, nome, senha, papel, assinatura}){
+  async function criarPorteiro({matricula, nome, senha, papel, assinatura, email}){
     if(!sb) throw new Error('Sem conexão.');
     if(!perfil || perfil.papel!=='gestor') throw new Error('Somente gestores cadastram porteiros.');
     const mat=soNumero(matricula);
@@ -353,27 +396,31 @@ window.PORTARIA = (function(){
     if(String(nome||'').trim().length<5) throw new Error('Informe o nome completo.');
     if(String(senha||'').length<8) throw new Error('A senha precisa ter pelo menos 8 caracteres.');
 
+    // E-mail real (opcional) tem precedência; senão usa o interno da matrícula.
+    const mail = String(email||'').trim().toLowerCase();
+    if(mail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) throw new Error('E-mail inválido.');
+    const login = mail || emailDe(mat);
+
     // Cliente separado e descartável: criar o usuário não pode derrubar
     // a sessão do gestor que está cadastrando.
     const sbTmp = window.supabase.createClient(urlBase(CFG.SUPABASE_URL), String(CFG.SUPABASE_ANON_KEY||'').trim(), {
       auth:{ persistSession:false, autoRefreshToken:false }
     });
-    const { data, error } = await sbTmp.auth.signUp({ email:emailDe(mat), password:senha });
+    const { data, error } = await sbTmp.auth.signUp({ email:login, password:senha });
     if(error){
-      if(/already/i.test(error.message||'')) throw new Error('Já existe usuário com a matrícula '+mat+'.');
+      if(/already/i.test(error.message||'')) throw new Error('Já existe usuário com o acesso '+login+'.');
       throw new Error(error.message);
     }
     const uid = data && data.user && data.user.id;
     if(!uid) throw new Error('Não foi possível criar o acesso. Verifique se a confirmação de e-mail está desligada no Supabase.');
 
-    const { error:e2 } = await sb.from('perfis').insert({
-      id:uid, matricula:mat, nome:String(nome).trim(),
-      papel:(papel==='gestor'?'gestor':'porteiro'), assinatura:assinatura||null, ativo:true
-    });
+    const novo={ id:uid, matricula:mat, nome:String(nome).trim(),
+                 papel:(papel==='gestor'?'gestor':'porteiro'),
+                 assinatura:assinatura||null, ativo:true };
+    const { error:e2 } = await sb.from('perfis').insert(novo);
     if(e2) throw new Error('Acesso criado, mas o cadastro falhou: '+e2.message);
 
-    return { id:uid, matricula:mat, nome:String(nome).trim(),
-             papel:(papel==='gestor'?'gestor':'porteiro'), assinatura:assinatura||'', ativo:true };
+    return Object.assign({}, novo, { assinatura:assinatura||'' });
   }
 
   async function salvarPerfil(id, campos){
@@ -430,7 +477,7 @@ window.PORTARIA = (function(){
 
   /* ---------------- API pública ---------------- */
   return {
-    iniciar, entrar, sair, trocarSenha,
+    iniciar, entrar, sair, trocarSenha, emailDeMatricula,
     puxarTudo, puxarNovidades, carregarAuditoria,
     criarRegistro, atualizarRegistro, apagarRegistro, auditar,
     descarregar, numeroNovo,

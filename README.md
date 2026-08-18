@@ -20,6 +20,7 @@ O acesso exige matrícula e senha.
 - [Perfis e permissões](#perfis-e-permissões)
 - [PDF de declaração](#pdf-de-declaração)
 - [Configuração](#configuração)
+- [Problemas comuns](#problemas-comuns)
 - [Limitações conhecidas](#limitações-conhecidas)
 
 ---
@@ -111,6 +112,28 @@ O cadastro vale para todos os aparelhos. Cada um pode trocar a própria senha de
 Ao abrir a página, a tela pede **matrícula e senha**. A sessão fica guardada no aparelho,
 então no uso normal isso é feito uma vez por turno — ou uma vez só, no computador fixo da
 portaria.
+
+No alto da tela há dois botões que definem o tipo de acesso:
+
+| Botão | Quem usa | O que digita |
+|---|---|---|
+| **Sou porteiro** | Porteiros | Matrícula (campo numérico grande) |
+| **Sou gestor** | Gestores | E-mail da empresa |
+
+A escolha fica guardada no aparelho: o computador da portaria abre sempre em *Sou porteiro*
+e o celular do gestor, em *Sou gestor*. A matrícula continua existindo para todos e é ela
+que aparece nos registros e nos PDFs — muda apenas o que se digita para entrar.
+
+**Ao cadastrar**, o campo de e-mail aparece só quando o perfil escolhido é *Gestor*, e aí é
+obrigatório. Para perfil *Porteiro* não há campo de e-mail: ele entra pela matrícula.
+
+**Para um usuário que já existe**, trocar o perfil na tela não muda como ele entra. Para um
+gestor passar a usar o e-mail corporativo, troque o e-mail dele em `Authentication` →
+`Users` → *Update user*. O `id` não muda, então histórico e auditoria continuam ligados à
+pessoa.
+
+> A aplicação não guarda o e-mail em tabela própria — quem autentica é o Supabase Auth.
+> Para consultar quem entra por e-mail, veja `Authentication` → `Users`.
 
 Use **Sair** ao terminar, principalmente em celular ou aparelho compartilhado: ao sair, a
 cópia local de dados é apagada do aparelho.
@@ -348,6 +371,43 @@ Tudo o que muda com frequência está no bloco `CONFIG`, no topo do `index.html`
 | `TURNOS` | Escala. Hoje 12x12: Diurno 07h–19h e Noturno 19h–07h |
 | `SETORES` | Lista de setores que podem autorizar entradas |
 | `TERMO_ENTRADA` / `TERMO_SAIDA` | Texto dos termos confirmados pelo porteiro |
+
+---
+
+## Problemas comuns
+
+### "Matrícula ou senha incorreta" logo na instalação
+
+A tela mostra, abaixo do erro, **qual e-mail interno está sendo procurado**
+(`1001@portaria.perpec.local`). Compare-o com o que está em
+`Authentication` → `Users`: na maioria das vezes a diferença é uma letra maiúscula, um
+espaço ou um domínio digitado diferente do que está no `DOMINIO_LOGIN` do `config.js`.
+
+Para ver tudo de uma vez, rode o bloco **DIAGNÓSTICO** no fim do `supabase-schema.sql`.
+Ele lista usuário do Auth e perfil lado a lado e diz o que está faltando.
+
+### "O usuário existe, mas está marcado como não confirmado"
+
+Desligue **Confirm email** em `Authentication` → `Providers` → `Email`. Para o usuário já
+criado, confirme em `Authentication` → `Users` ou rode o `UPDATE` indicado no bloco de
+diagnóstico.
+
+### "Seu usuário ainda não foi liberado por um gestor"
+
+A senha está certa e o login funcionou, mas não existe linha em `perfis` para esse usuário.
+Rode o `INSERT` do bloco **PRIMEIRO GESTOR**. Ele só funciona se o usuário já existir em
+`auth.users` — se rodar antes, não insere nada e não avisa.
+
+### "O Supabase recusou o e-mail interno"
+
+Alguns projetos rejeitam domínios sem TLD real, como `.local`. Troque `DOMINIO_LOGIN` no
+`config.js` por algo comum (`portaria.perpec.com.br`) e recrie os usuários com esse
+domínio. Nenhuma mensagem é enviada — o domínio só precisa passar na validação.
+
+### A página não reflete o que eu subi
+
+O GitHub Pages e o navegador guardam cache. Espere um ou dois minutos e recarregue com
+`Ctrl+F5`.
 
 ---
 

@@ -341,10 +341,20 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
 .gate-card .top p{font-size:12.5px;color:var(--muted);margin-top:6px}
 .gate-card .body{padding:1.4rem 1.5rem 1.5rem}
 .gate-msg{display:none;font-size:13px;font-weight:700;border-radius:var(--radius);padding:11px 13px;margin-bottom:14px;
-          color:var(--st-late);background:var(--st-late-bg);border:1.5px solid var(--st-late-bd)}
+          color:var(--st-late);background:var(--st-late-bg);border:1.5px solid var(--st-late-bd);
+          white-space:pre-line;line-height:1.5}
 .gate-msg.on{display:block}
 .gate-msg.info{color:var(--st-in);background:var(--st-in-bg);border-color:var(--st-in-bd)}
 .gate-foot{font-size:11.5px;color:var(--muted);text-align:center;margin-top:16px;line-height:1.5}
+
+/* Escolha do tipo de acesso: porteiro entra por matrícula, gestor por e-mail */
+.gate-modo{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:18px}
+.gm{padding:13px 10px;min-height:52px;border:2px solid var(--border2);border-radius:var(--radius);background:var(--surface);
+    font-family:inherit;font-size:14px;font-weight:800;color:var(--muted);cursor:pointer;transition:all .13s;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.gm:hover{border-color:#9A9087}
+.gm .sub{font-size:10.5px;font-weight:600;letter-spacing:.02em;opacity:.8}
+.gm.sel{border-color:var(--red);background:var(--accent-lt);color:var(--red)}
 
 /* ====== BARRA DE USUÁRIO E SINCRONIZAÇÃO ====== */
 .user-strip{background:var(--surface2);border-bottom:1px solid var(--border)}
@@ -384,12 +394,20 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
     </div>
     <div class="body">
       <div class="gate-msg" id="gateMsg"></div>
+      <div class="gate-modo">
+        <button type="button" class="gm sel" id="gmPorteiro" onclick="setModoLogin('porteiro')">
+          Sou porteiro<span class="sub">entro com matrícula</span>
+        </button>
+        <button type="button" class="gm" id="gmGestor" onclick="setModoLogin('gestor')">
+          Sou gestor<span class="sub">entro com e-mail</span>
+        </button>
+      </div>
       <form id="gateForm" onsubmit="event.preventDefault();fazerLogin()">
         <div class="field" style="margin-bottom:14px">
-          <label>Matrícula</label>
+          <label id="gLabel">Matrícula</label>
           <input type="text" id="gMat" inputmode="numeric" maxlength="10" autocomplete="username" placeholder="0000"
                  style="font-family:'Courier New',monospace;font-size:26px;font-weight:700;letter-spacing:.18em;text-align:center"
-                 oninput="this.value=this.value.replace(/\D/g,'')">
+                 oninput="filtrarLogin(this)">
         </div>
         <div class="field" style="margin-bottom:18px">
           <label>Senha</label>
@@ -1126,11 +1144,19 @@ function formPorteiro(p){
           '</div>'+
           '<div class="field">'+
             '<label>Perfil</label>'+
-            '<select id="pPapel">'+
+            '<select id="pPapel" onchange="alternarCampoEmail()">'+
               '<option value="porteiro">Porteiro — registra entradas e saídas</option>'+
               '<option value="gestor">Gestor — também apaga registros e vê documentos</option>'+
             '</select>'+
           '</div>'+
+        '</div>'+
+        // Porteiro entra por matrícula; gestor, por e-mail. O campo só
+        // aparece quando o perfil escolhido é o de gestor.
+        '<div class="field" id="wEmailPerfil" style="display:none;margin-bottom:14px">'+
+          '<label>E-mail da empresa <span class="req">*</span></label>'+
+          '<input type="email" id="pEmail" placeholder="nome@perpec.com.br" autocomplete="off">'+
+          '<span class="hint">É por este e-mail que o gestor entra no sistema. A matrícula continua '+
+          'aparecendo nos registros e nos PDFs.</span>'+
         '</div>'
       : (podePapel
           ? '<div class="field" style="margin-bottom:14px">'+
@@ -1139,6 +1165,9 @@ function formPorteiro(p){
                 '<option value="porteiro"'+(p.papel!=='gestor'?' selected':'')+'>Porteiro — registra entradas e saídas</option>'+
                 '<option value="gestor"'+(p.papel==='gestor'?' selected':'')+'>Gestor — também apaga registros e vê documentos</option>'+
               '</select>'+
+              '<span class="hint">Mudar o perfil não muda como a pessoa entra. Para um gestor passar a '+
+              'usar o e-mail da empresa, troque o e-mail dele no painel do Supabase '+
+              '(Authentication → Users → Update user).</span>'+
             '</div>'
           : ''))+
     (assinAtual
@@ -1157,8 +1186,18 @@ function formPorteiro(p){
 
   setTimeout(()=>{
     PAD=criarPad(document.getElementById('pAssin'));
+    alternarCampoEmail();
     const el=document.getElementById(novo?'pMat':'pNome'); if(el) el.focus();
   },60);
+}
+
+/* Mostra o campo de e-mail só quando o perfil escolhido é gestor. */
+function alternarCampoEmail(){
+  const sel=document.getElementById('pPapel');
+  const box=document.getElementById('wEmailPerfil');
+  if(!sel||!box) return;
+  box.style.display = sel.value==='gestor' ? '' : 'none';
+  if(sel.value!=='gestor'){ const e=document.getElementById('pEmail'); if(e) e.value=''; }
 }
 
 async function salvarPorteiro(matOriginal){
@@ -1177,11 +1216,16 @@ async function salvarPorteiro(matOriginal){
   try{
     if(novo){
       const senha=(document.getElementById('pSenha').value||'');
+      const papel=selPapel?selPapel.value:'porteiro';
+      // Gestor entra por e-mail; porteiro, por matrícula.
+      const mail=papel==='gestor' ? (document.getElementById('pEmail').value||'').trim() : '';
       if(senha.length<8){ showToast('A senha precisa ter pelo menos 8 caracteres.','error'); return; }
+      if(papel==='gestor' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)){
+        showToast('Gestor entra pelo e-mail da empresa. Informe um e-mail válido.','error'); return;
+      }
       if(!desenhou){ showToast('Falta assinar no quadro branco.','error'); return; }
       showToast('Criando acesso…');
-      await PORTARIA.criarPorteiro({ matricula:mat, nome, senha,
-                                     papel:selPapel?selPapel.value:'porteiro', assinatura:imagem });
+      await PORTARIA.criarPorteiro({ matricula:mat, nome, senha, email:mail, papel, assinatura:imagem });
     }else{
       const p=acharPorteiro(matOriginal);
       const campos={ nome };
@@ -2285,7 +2329,48 @@ function relogio(){
     p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear()+'  '+p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());
 }
 
-/* ---- Login ---- */
+/* ---- Login ----
+   Porteiro entra por MATRÍCULA (campo numérico grande, teclado numérico);
+   gestor entra pelo E-MAIL da empresa. A escolha fica guardada no aparelho,
+   então o computador da portaria abre sempre em "Sou porteiro" e o celular
+   do gestor, em "Sou gestor". */
+const CHAVE_MODO='perpec.portaria.modoLogin';
+let MODO_LOGIN='porteiro';
+
+function aplicarModoLogin(){
+  const el=document.getElementById('gMat');
+  const lab=document.getElementById('gLabel');
+  const gestor = MODO_LOGIN==='gestor';
+  document.getElementById('gmPorteiro').classList.toggle('sel',!gestor);
+  document.getElementById('gmGestor').classList.toggle('sel',gestor);
+  if(gestor){
+    el.type='email'; el.inputMode='email'; el.maxLength=120;
+    el.placeholder='nome@perpec.com.br';
+    el.style.cssText='font-size:16px;text-align:left';
+    lab.textContent='E-mail da empresa';
+  }else{
+    el.type='text'; el.inputMode='numeric'; el.maxLength=10;
+    el.placeholder='0000';
+    el.style.cssText="font-family:'Courier New',monospace;font-size:26px;font-weight:700;letter-spacing:.18em;text-align:center";
+    lab.textContent='Matrícula';
+  }
+}
+function setModoLogin(m){
+  if(MODO_LOGIN===m) return;
+  MODO_LOGIN=m;
+  try{ localStorage.setItem(CHAVE_MODO,m); }catch(e){}
+  document.getElementById('gMat').value='';
+  aplicarModoLogin();
+  document.getElementById('gMat').focus();
+}
+function filtrarLogin(el){
+  // No modo porteiro só passam números — mas se colarem um e-mail, troca
+  // de modo em vez de apagar tudo o que a pessoa digitou.
+  if(MODO_LOGIN==='gestor') return;
+  if(/@/.test(el.value)){ const v=el.value; setModoLogin('gestor'); el.value=v; return; }
+  el.value=el.value.replace(/\D/g,'');
+}
+
 function mostrarGate(msg,tipo){
   const g=document.getElementById('gate');
   g.hidden=false;
@@ -2307,7 +2392,11 @@ async function fazerLogin(){
     esconderGate();
     await depoisDoLogin();
   }catch(e){
-    mostrarGate(e.message||'Não foi possível entrar.');
+    let msg=e.message||'Não foi possível entrar.';
+    // O e-mail interno é derivado da matrícula. Mostrá-lo aqui revela na hora
+    // um cadastro feito com domínio ou matrícula diferente do configurado.
+    if(mat) msg+='\n\nAcesso procurado no servidor: '+PORTARIA.emailDeMatricula(mat);
+    mostrarGate(msg);
   }finally{
     btn.disabled=false; btn.textContent='ENTRAR';
   }
@@ -2349,6 +2438,8 @@ window.addEventListener('DOMContentLoaded',async ()=>{
 
   carregarLogo();
   preencherSelects();
+  try{ MODO_LOGIN=localStorage.getItem(CHAVE_MODO)||'porteiro'; }catch(e){}
+  aplicarModoLogin();
   restaurarRascunho();
   if(!document.getElementById('fEntrada').value) agoraNoCampo('fEntrada');
 

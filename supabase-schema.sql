@@ -42,7 +42,7 @@ create table if not exists public.perfis (
   atualizado_em timestamptz not null default now()
 );
 
-comment on table  public.perfis is 'Porteiros e gestores. A matrícula é o login.';
+comment on table  public.perfis is 'Porteiros e gestores. A matrícula é o login padrão.';
 comment on column public.perfis.assinatura is 'Assinatura desenhada, PNG base64. Sai nos PDFs.';
 
 
@@ -440,4 +440,96 @@ grant execute on function public.anonimizar_antigos(integer) to authenticated;
 -- Depois disso, o gestor entra na aplicação com matrícula 1001 e a senha
 -- definida, cadastra a própria assinatura e cria os demais porteiros
 -- pela tela — sem precisar voltar ao painel do Supabase.
+-- =====================================================================
+
+
+-- =====================================================================
+-- USAR O E-MAIL DA EMPRESA NO LUGAR DA MATRÍCULA
+-- ---------------------------------------------------------------------
+-- A tela de entrada aceita as duas coisas no mesmo campo. Para o gestor
+-- passar a entrar com o e-mail corporativo:
+--
+-- CAMINHO 1 (sem SQL): cadastre-se como novo gestor pela própria tela,
+--   em Porteiros → Cadastrar porteiro, escolhendo Perfil = Gestor e
+--   informando o e-mail. Depois desative o cadastro antigo. Só não serve
+--   se você quiser manter exatamente a mesma matrícula, que é única.
+--
+-- CAMINHO 2 (SQL): trocar o e-mail do usuário que já existe. O painel do
+--   Supabase não expõe essa edição, mas o SQL Editor sim. O id do usuário
+--   não muda, então perfil, matrícula, histórico e auditoria continuam
+--   ligados a ele, e A SENHA CONTINUA A MESMA.
+--
+--   Edite as duas primeiras linhas e rode o bloco inteiro:
+-- ---------------------------------------------------------------------
+-- do $$
+-- declare
+--   v_antigo text := '1001@portaria.perpec.local';   -- e-mail atual
+--   v_novo   text := 'joao@perpec.com.br';           -- e-mail novo
+--   v_id     uuid;
+-- begin
+--   select id into v_id from auth.users where lower(email) = lower(v_antigo);
+--   if v_id is null then
+--     raise exception 'Não existe usuário com o e-mail %', v_antigo;
+--   end if;
+--   if exists (select 1 from auth.users where lower(email) = lower(v_novo)) then
+--     raise exception 'Já existe usuário com o e-mail %', v_novo;
+--   end if;
+--
+--   update auth.users
+--      set email              = lower(v_novo),
+--          email_confirmed_at = coalesce(email_confirmed_at, now()),
+--          updated_at         = now()
+--    where id = v_id;
+--
+--   -- A identidade do provedor "email" guarda o endereço em identity_data.
+--   -- A coluna identities.email é gerada a partir dela, então segue sozinha.
+--   update auth.identities
+--      set identity_data = jsonb_set(identity_data, '{email}', to_jsonb(lower(v_novo))),
+--          updated_at    = now()
+--    where user_id = v_id and provider = 'email';
+--
+--   raise notice 'Pronto: % agora entra como %', v_id, lower(v_novo);
+-- end $$;
+-- ---------------------------------------------------------------------
+-- Confira depois com a consulta do bloco DIAGNÓSTICO.
+--
+-- A matrícula continua existindo e é ela que aparece nos registros e nos
+-- PDFs — muda apenas o que se digita para entrar.
+-- =====================================================================
+
+
+-- =====================================================================
+-- DIAGNÓSTICO  — rode quando o login não funcionar
+-- ---------------------------------------------------------------------
+-- Mostra, lado a lado, o usuário do Auth e o perfil da aplicação.
+-- Leia assim:
+--   "sem usuario no Auth"  -> o e-mail não existe. Confira se foi criado
+--                             como MATRICULA@portaria.perpec.local, sem
+--                             espaço e sem letra maiúscula.
+--   confirmado = false     -> desligue "Confirm email" em Authentication →
+--                             Providers → Email e confirme o usuário.
+--   "sem perfil"           -> o usuário entra, mas a aplicação recusa.
+--                             Rode o INSERT do bloco PRIMEIRO GESTOR.
+--   papel <> 'gestor'      -> entra como porteiro. Corrija com o UPDATE
+--                             que está logo abaixo.
+-- ---------------------------------------------------------------------
+-- select
+--   u.email,
+--   (u.email_confirmed_at is not null) as confirmado,
+--   coalesce(p.matricula, '— sem perfil —') as matricula,
+--   coalesce(p.nome,      '— sem perfil —') as nome,
+--   coalesce(p.papel,     '— sem perfil —') as papel,
+--   p.ativo,
+--   (p.assinatura is not null) as tem_assinatura
+-- from auth.users u
+-- left join public.perfis p on p.id = u.id
+-- order by u.created_at;
+-- ---------------------------------------------------------------------
+-- Promover alguém que já tem perfil a gestor:
+--   update public.perfis set papel = 'gestor', ativo = true
+--    where matricula = '1001';
+--
+-- Confirmar manualmente um usuário do Auth:
+--   update auth.users set email_confirmed_at = now()
+--    where email = '1001@portaria.perpec.local' and email_confirmed_at is null;
 -- =====================================================================
