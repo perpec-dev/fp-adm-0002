@@ -16,7 +16,7 @@
    ============================================================ */
 window.SUPABASE_CONFIG = {
   SUPABASE_URL:      "https://aqvyuzccvmlcchtznypt.supabase.co/rest/v1/",
-  SUPABASE_ANON_KEY: "COLE-AQUI-A-CHAVE-ANON",
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxdnl1emNjdm1sY2NodHpueXB0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcwNTgwNjYsImV4cCI6MjEwMjYzNDA2Nn0.JkiUPD-S6PqpSUwNZh7UvVTqDraDpU2Z0yE5tf7CmvI",
 
   // Domínio interno usado para transformar a matrícula em e-mail de login.
   // Não precisa existir de verdade — nenhuma mensagem é enviada.
