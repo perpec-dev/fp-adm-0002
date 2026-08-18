@@ -95,13 +95,39 @@ window.PORTARIA = (function(){
              assinatura:p.assinatura||'', ativo:!!p.ativo, criadoEm:p.criado_em };
   }
 
+  /* A biblioteca já acrescenta /rest/v1, /auth/v1 etc. Se alguém colar a
+     URL com esse caminho no fim, tira aqui em vez de quebrar tudo depois. */
+  function urlBase(u){
+    return String(u||'').trim()
+      .replace(/\/+$/,'')
+      .replace(/\/(rest|auth|storage|realtime)\/v1$/i,'')
+      .replace(/\/+$/,'');
+  }
+
   /* ---------------- inicialização e sessão ---------------- */
   async function iniciar(){
-    if(!window.supabase || !CFG.SUPABASE_URL || /SEU-PROJETO/.test(CFG.SUPABASE_URL)){
-      setEstado('erro','Conexão não configurada. Preencha o config.js.');
-      return { configurado:false, sessao:null };
+    const url = urlBase(CFG.SUPABASE_URL);
+    const key = String(CFG.SUPABASE_ANON_KEY||'').trim();
+
+    // Diagnóstico específico: mensagem genérica só faz perder tempo.
+    let falta = null;
+    if(!window.supabase)
+      falta = 'A biblioteca do banco não carregou. Verifique a internet e se o navegador não está bloqueando o cdn.jsdelivr.net.';
+    else if(!url || /SEU-PROJETO/i.test(url))
+      falta = 'Falta o endereço do projeto no config.js (Supabase → Project Settings → Data API → Project URL).';
+    else if(!/^https:\/\/[a-z0-9-]+\.supabase\.(co|in)$/i.test(url))
+      falta = 'O endereço no config.js parece errado: use só https://SEU-PROJETO.supabase.co, sem nada depois.';
+    else if(!key || /COLE-AQUI/i.test(key))
+      falta = 'Falta a chave "anon" no config.js (Supabase → Project Settings → API Keys → anon / public).';
+    else if(/^eyJ/.test(key) === false && /^sb_/.test(key) === false)
+      falta = 'A chave no config.js não parece a chave "anon" do Supabase. Copie de novo em API Keys.';
+
+    if(falta){
+      setEstado('erro', falta);
+      return { configurado:false, sessao:null, motivo:falta };
     }
-    sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {
+
+    sb = window.supabase.createClient(url, key, {
       auth:{ persistSession:true, autoRefreshToken:true, storageKey:'perpec.portaria.auth' }
     });
 
@@ -329,7 +355,7 @@ window.PORTARIA = (function(){
 
     // Cliente separado e descartável: criar o usuário não pode derrubar
     // a sessão do gestor que está cadastrando.
-    const sbTmp = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {
+    const sbTmp = window.supabase.createClient(urlBase(CFG.SUPABASE_URL), String(CFG.SUPABASE_ANON_KEY||'').trim(), {
       auth:{ persistSession:false, autoRefreshToken:false }
     });
     const { data, error } = await sbTmp.auth.signUp({ email:emailDe(mat), password:senha });

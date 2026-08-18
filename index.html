@@ -2371,7 +2371,7 @@ window.addEventListener('DOMContentLoaded',async ()=>{
     return;
   }
   if(!ini.configurado){
-    mostrarGate('A conexão com o banco ainda não foi configurada. Avise a Engenharia (arquivo config.js).');
+    mostrarGate(ini.motivo||'A conexão com o banco ainda não foi configurada (arquivo config.js).');
     return;
   }
   if(ini.sessao){

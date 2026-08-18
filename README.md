@@ -67,8 +67,17 @@ nenhuma mensagem é enviada. Mantenha **Allow new users to sign up** ligado — 
 o gestor cria os porteiros pela tela.
 
 **4. Preencher o `config.js`**
-Em `Project Settings` → `Data API`, copie a **URL** e a chave **anon / public** para o
-`config.js`. Nunca use a chave `service_role`.
+
+- `SUPABASE_URL` — em `Project Settings` → `Data API` → **Project URL**.
+  Use **só o endereço**, sem caminho no fim:
+  `https://abcdefgh.supabase.co` ✅ · `https://abcdefgh.supabase.co/rest/v1/` ❌
+  O `/rest/v1/` é acrescentado sozinho pela biblioteca; deixá-lo aqui duplica o caminho e
+  todas as chamadas falham.
+- `SUPABASE_ANON_KEY` — em `Project Settings` → `API Keys` → chave **anon / public**.
+  É um texto longo, começando com `eyJ` (ou `sb_publishable_`).
+
+Nunca use a chave `service_role`. Se algum dos dois estiver faltando ou errado, a tela de
+entrada diz exatamente qual é o problema.
 
 **5. Criar o primeiro gestor**
 Siga o bloco **PRIMEIRO GESTOR**, no fim do `supabase-schema.sql`: criar o usuário em
