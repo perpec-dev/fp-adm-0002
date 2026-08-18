@@ -48,7 +48,7 @@
 
     // ---- Listas de apoio ----
     // Escala 12x12. Ajuste os horários aqui se a escala da portaria mudar.
-    TURNOS: ["Turno Diurno (07h–19h)", "Turno Noturno (19h–07h)"],
+    TURNOS: ["Turno Diurno (06h–18h)", "Turno Noturno (18h–06h)"],
     SETORES: [
       "Diretoria", "Administrativo / Financeiro", "Comercial", "Engenharia",
       "Qualidade (SGQ)", "Suprimentos / Compras", "Produção / Oficina",
@@ -1363,7 +1363,7 @@ function alternarTurno(){ DB.turno ? encerrarTurno() : abrirTurno(); }
 /* Sugere a escala pelo horário atual — menos um campo para pensar. */
 function turnoSugerido(){
   const h=new Date().getHours();
-  const diurno = h>=7 && h<19;
+  const diurno = h>=6 && h<18;
   return CONFIG.TURNOS[diurno?0:(CONFIG.TURNOS.length>1?1:0)];
 }
 
