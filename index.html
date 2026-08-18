@@ -12,6 +12,13 @@
      página é aberta direto do disco (file://). Ver cabeçalho de logo.js. -->
 <script src="logo.js"></script>
 
+<!-- Banco de dados compartilhado (Supabase) + camada de sincronização.
+     config.js guarda a URL e a chave pública do projeto; sync.js cuida do
+     login, da fila offline e da conversa com o servidor. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="sync.js"></script>
+
 <!-- ============================================================= -->
 <!-- ===== CONFIG (ponto único de manutenção) ==================== -->
 <!-- ============================================================= -->
@@ -321,9 +328,82 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
 .warn-box.e{color:var(--st-late);background:var(--st-late-bg);border-color:var(--st-late-bd)}
 .warn-box.i{color:var(--st-in);background:var(--st-in-bg);border-color:var(--st-in-bd)}
 .warn-box.g{color:var(--st-out);background:var(--st-out-bg);border-color:var(--st-out-bd)}
+
+/* ====== TELA DE ENTRADA (login) ====== */
+.gate{position:fixed;inset:0;z-index:9500;background:var(--dark);display:flex;align-items:center;
+      justify-content:center;padding:1.2rem;overflow-y:auto}
+.gate[hidden]{display:none}
+.gate-card{background:var(--surface);border-radius:var(--radius-lg);max-width:420px;width:100%;
+           box-shadow:0 24px 70px rgba(0,0,0,.5);overflow:hidden;margin:auto}
+.gate-card .top{background:#fff;padding:1.6rem 1.5rem 1.3rem;text-align:center;border-bottom:3px solid var(--red)}
+.gate-card .top img{height:42px;width:auto;margin-bottom:14px}
+.gate-card .top h1{font-size:16px;font-weight:800;color:var(--dark)}
+.gate-card .top p{font-size:12.5px;color:var(--muted);margin-top:6px}
+.gate-card .body{padding:1.4rem 1.5rem 1.5rem}
+.gate-msg{display:none;font-size:13px;font-weight:700;border-radius:var(--radius);padding:11px 13px;margin-bottom:14px;
+          color:var(--st-late);background:var(--st-late-bg);border:1.5px solid var(--st-late-bd)}
+.gate-msg.on{display:block}
+.gate-msg.info{color:var(--st-in);background:var(--st-in-bg);border-color:var(--st-in-bd)}
+.gate-foot{font-size:11.5px;color:var(--muted);text-align:center;margin-top:16px;line-height:1.5}
+
+/* ====== BARRA DE USUÁRIO E SINCRONIZAÇÃO ====== */
+.user-strip{background:var(--surface2);border-bottom:1px solid var(--border)}
+.user-inner{max-width:1080px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:.4rem 1.5rem;flex-wrap:wrap}
+.user-nome{font-size:12.5px;font-weight:700;color:var(--text)}
+.user-papel{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:20px;
+            background:var(--st-in-bg);color:var(--st-in);border:1px solid var(--st-in-bd)}
+.user-papel.gestor{background:var(--accent-lt);color:var(--red);border-color:#E8B8B0}
+.sync{display:flex;align-items:center;gap:7px;margin-left:auto;font-size:12px;font-weight:700}
+.sync .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.sync.ok    {color:var(--st-out)}  .sync.ok    .dot{background:var(--st-out)}
+.sync.sinc  {color:var(--st-in)}   .sync.sinc  .dot{background:var(--st-in);animation:pulsa 1s infinite}
+.sync.off   {color:var(--st-warn)} .sync.off   .dot{background:var(--st-warn)}
+.sync.erro  {color:var(--st-late)} .sync.erro  .dot{background:var(--st-late)}
+@keyframes pulsa{0%,100%{opacity:1}50%{opacity:.3}}
+@media(max-width:600px){.user-inner{padding:.4rem 1rem}}
+
+/* Etiqueta de registro ainda não enviado ao servidor */
+.bdg.b-fila{background:var(--st-warn-bg);color:var(--st-warn);border-color:var(--st-warn-bd)}
+
+/* Campo de documento mascarado */
+.doc-mask{display:inline-flex;align-items:center;gap:9px;flex-wrap:wrap}
+.doc-mask .val{font-family:"Courier New",monospace;letter-spacing:.06em}
 </style>
 </head>
 <body>
+
+<!-- ===== TELA DE ENTRADA — cobre tudo até o login ser feito =====
+     Começa VISÍVEL de propósito: nenhum dado de visitante pode aparecer,
+     nem por um instante, antes da identificação. -->
+<div class="gate" id="gate">
+  <div class="gate-card">
+    <div class="top">
+      <img id="gateLogo" src="PERPEC - LOGO PRINCIPAL.png" alt="Perpec Oilfield Supply"/>
+      <h1>Controle de Entrada de Veículos</h1>
+      <p>Portaria — identifique-se para continuar</p>
+    </div>
+    <div class="body">
+      <div class="gate-msg" id="gateMsg"></div>
+      <form id="gateForm" onsubmit="event.preventDefault();fazerLogin()">
+        <div class="field" style="margin-bottom:14px">
+          <label>Matrícula</label>
+          <input type="text" id="gMat" inputmode="numeric" maxlength="10" autocomplete="username" placeholder="0000"
+                 style="font-family:'Courier New',monospace;font-size:26px;font-weight:700;letter-spacing:.18em;text-align:center"
+                 oninput="this.value=this.value.replace(/\D/g,'')">
+        </div>
+        <div class="field" style="margin-bottom:18px">
+          <label>Senha</label>
+          <input type="password" id="gSenha" autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <button class="btn btn-red btn-xl" type="submit" id="gBtn">ENTRAR</button>
+      </form>
+      <div class="gate-foot">
+        Esqueceu a senha? Procure o gestor da portaria.<br>
+        Os dados desta aplicação são de acesso restrito.
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="sticky-top">
   <header class="site-header">
@@ -348,11 +428,22 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
     </div>
   </div>
 
-  <!-- Turno aberto: identifica quem está operando a portaria agora. -->
+  <!-- Quem está logado + situação da sincronização com o servidor -->
+  <div class="user-strip">
+    <div class="user-inner">
+      <span class="user-nome" id="userNome">—</span>
+      <span class="user-papel" id="userPapel">—</span>
+      <span class="sync off" id="syncBox"><span class="dot"></span><span id="syncTxt">—</span></span>
+      <button class="btn btn-outline btn-sm" type="button" onclick="abrirMinhaConta()">Minha conta</button>
+      <button class="btn btn-outline btn-sm" type="button" onclick="fazerLogout()">Sair</button>
+    </div>
+  </div>
+
+  <!-- Turno aberto: o porteiro é o próprio usuário logado; só escolhe a escala. -->
   <div class="turno-strip off" id="turnoStrip">
     <div class="turno-inner">
       <span class="turno-dot" id="turnoDot"></span>
-      <span class="turno-txt" id="turnoTxt">Nenhum porteiro no turno</span>
+      <span class="turno-txt" id="turnoTxt">Nenhum turno aberto</span>
       <img class="assin-mini" id="turnoAssin" alt="assinatura" hidden/>
       <button class="btn btn-dark btn-sm" id="turnoBtn" type="button" onclick="alternarTurno()">Começar turno</button>
     </div>
@@ -607,18 +698,18 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
     <div class="card">
       <div class="card-head">
         <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
-        <h2>Cópia de segurança</h2>
+        <h2>Exportar e manutenção</h2>
       </div>
       <div class="card-body">
-        <div class="warn-box w" style="margin-bottom:16px">
-          Os registros ficam guardados só neste computador. Se alguém limpar o navegador, os dados somem.
-          <b>Faça a cópia de segurança toda semana</b> e guarde o arquivo em pasta da rede.
+        <div class="warn-box g" style="margin-bottom:16px">
+          Os registros ficam no servidor e são os mesmos em qualquer aparelho.
+          O que está nesta máquina é só uma cópia para funcionar sem internet — não é preciso
+          fazer backup manual.
         </div>
         <div class="act-group">
           <button class="btn btn-dark"    type="button" onclick="exportarCSV()">Exportar para Excel</button>
-          <button class="btn btn-outline" type="button" onclick="exportarBackup()">Salvar cópia de segurança</button>
-          <button class="btn btn-outline" type="button" onclick="document.getElementById('fileImport').click()">Restaurar cópia</button>
-          <input type="file" id="fileImport" accept=".json,application/json" hidden onchange="importarBackup(this)">
+          <button class="btn btn-outline" type="button" onclick="forcarSincronizacao()">Atualizar agora</button>
+          <button class="btn btn-outline" id="btnLGPD" type="button" onclick="descartarAntigos()">Descartar documentos antigos</button>
         </div>
         <div class="tbl-sum" id="usoEspaco" style="margin-top:14px"></div>
       </div>
@@ -634,19 +725,16 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
         <span class="count-pill" id="pillPorteiros">—</span>
       </div>
       <div class="card-body">
-        <div class="warn-box i" style="margin-bottom:16px">
-          Cadastre cada porteiro <b>uma vez só</b>, com matrícula, nome completo e assinatura.
-          No dia a dia ele só digita o número da matrícula ao começar o turno — o nome e a assinatura
-          entram sozinhos em todos os registros.
+        <div class="warn-box i" id="avisoPorteiros" style="margin-bottom:16px">
+          Cadastre cada porteiro <b>uma vez só</b>: matrícula, nome completo, senha e assinatura.
+          A matrícula é o login dele. O cadastro vale para todos os aparelhos — PC da portaria,
+          celular e tablet usam o mesmo acesso.
         </div>
-        <div class="act-group" style="margin-bottom:18px">
+        <div class="act-group" id="acoesPorteiros" style="margin-bottom:18px">
           <button class="btn btn-red" type="button" onclick="novoPorteiro()">
             <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
             Cadastrar porteiro
           </button>
-          <button class="btn btn-outline" type="button" onclick="exportarPorteiros()">Salvar cadastro (.json)</button>
-          <button class="btn btn-outline" type="button" onclick="document.getElementById('filePorteiros').click()">Carregar cadastro</button>
-          <input type="file" id="filePorteiros" accept=".json,.csv,application/json,text/csv" hidden onchange="importarPorteiros(this)">
         </div>
         <div id="listaPorteiros"></div>
       </div>
@@ -679,13 +767,24 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
 /* ================================================================
    CONTROLE DE ENTRADA DE VEÍCULOS — PORTARIA
    ----------------------------------------------------------------
-   Aplicação de página única, sem servidor. O "banco de dados" é o
-   localStorage do navegador (CONFIG.DB_KEY), com:
-     - numeração sequencial por ano
-     - assinatura DESENHADA do porteiro, capturada uma vez por turno
-     - trilha de auditoria por registro (append-only)
-     - selo de integridade (detecta edição direta do armazenamento)
-     - backup/restauração em JSON e exportação em CSV
+   Página estática (GitHub Pages) apoiada num banco compartilhado
+   (Supabase). Os dados são os MESMOS em qualquer aparelho: PC da
+   portaria, celular, tablet.
+
+   ONDE FICA CADA COISA
+     - Servidor (Supabase): fonte da verdade. Registros, cadastro de
+       porteiros, trilha de auditoria e numeração sequencial.
+     - localStorage: apenas uma CÓPIA local, para a tela abrir na hora
+       e para a portaria continuar registrando se a internet cair.
+     - sync.js: login, fila de envio e sondagem do servidor.
+
+   SEGURANÇA
+     - Nada é lido nem gravado sem login (matrícula + senha).
+     - O servidor decide o que cada papel pode fazer (Row Level
+       Security). O que a tela esconde é conforto, não proteção.
+     - O documento do visitante (RG/CPF) nunca chega ao navegador
+       inteiro: a tela recebe só a máscara. O valor completo sai por
+       uma função exclusiva de gestor, que registra a consulta.
 
    CÓDIGO DE CORES (vale em toda a interface e nos PDFs):
      AZUL     dentro da unidade, dentro do tempo normal
@@ -695,20 +794,26 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
    ================================================================ */
 
 /* ---------------- Estado em memória ---------------- */
-let DB = null;             // objeto persistido (ver dbVazio())
+let DB = null;             // cópia local (ver dbVazio())
 let ABA = 'novo';          // aba corrente
 let MODAL_ID = null;       // id do registro aberto no modal
 let FILTRO_ABERTOS = '';   // '', 'in', 'warn', 'late' — filtro do painel resumo
 let PAD = null;            // instância do bloco de assinatura em uso
+let EU = null;             // perfil logado: {id, matricula, nome, papel, assinatura}
+
+const souGestor = () => !!EU && EU.papel==='gestor';
 
 /* ================================================================
-   1. PERSISTÊNCIA
+   1. CÓPIA LOCAL
+   ----------------------------------------------------------------
+   dbSalvar() grava SOMENTE aqui. Quem envia ao servidor é o sync.js,
+   chamado de propósito em cada ponto de gravação — assim fica
+   explícito no código o que sai da máquina.
    ================================================================ */
 function dbVazio(){
-  // porteiros:    cadastro fixo — { matricula, nome, assinId, ativo, criadoEm }
-  // assinaturas:  { id -> dataURL PNG }. Uma por PORTEIRO (não por registro),
-  //               então o armazenamento não cresce com o movimento da portaria.
-  return { v:3, seq:{}, registros:[], porteiros:[], turno:null, assinaturas:{}, rascunho:null };
+  // porteiros:   espelho de public.perfis — { id, matricula, nome, papel, assinId, ativo }
+  // assinaturas: { id do perfil -> PNG base64 }, montado a partir dos perfis
+  return { v:4, registros:[], porteiros:[], turno:null, assinaturas:{}, rascunho:null };
 }
 
 function dbCarregar(){
@@ -721,9 +826,8 @@ function dbCarregar(){
     if(!o || typeof o!=='object' || !Array.isArray(o.registros)) throw new Error('formato');
     return Object.assign(dbVazio(),o);
   }catch(e){
-    // Não sobrescreve: guarda o conteúdo corrompido para eventual recuperação manual.
+    // Não sobrescreve: guarda o conteúdo ilegível para eventual perícia.
     try{ localStorage.setItem(CONFIG.DB_KEY+'.corrompido.'+Date.now(), raw); }catch(_){}
-    showToast('Não consegui ler os dados salvos. Uma cópia foi guardada.','error');
     return dbVazio();
   }
 }
@@ -733,18 +837,51 @@ function dbSalvar(){
     localStorage.setItem(CONFIG.DB_KEY, JSON.stringify(DB));
     return true;
   }catch(e){
-    showToast('Não consegui salvar.\nFaça a cópia de segurança agora.','error');
-    return false;
+    // A cópia local encheu. Os dados do servidor continuam intactos.
+    showToast('A cópia local encheu. Os registros no servidor estão a salvo.','error');
+    return true;
   }
 }
 
-/* Sequência PORT-2026-0001, reiniciada a cada ano. */
-function proximoNumero(data){
-  const ano=String((data||new Date()).getFullYear());
-  const n=(DB.seq[ano]||0)+1;
-  return { numero:CONFIG.PREFIXO_REGISTRO+'-'+ano+'-'+String(n).padStart(4,'0'), ano:ano, n:n };
+/* Número provisório, usado só quando a entrada é registrada sem internet.
+   O definitivo vem do servidor (função proximo_numero) na hora do envio. */
+function numeroProvisorio(){
+  const ano=new Date().getFullYear();
+  const n=DB.registros.filter(r=>r.provisorio).length+1;
+  return CONFIG.PREFIXO_REGISTRO+'-'+ano+'-P'+String(n).padStart(3,'0');
 }
-function consumirNumero(ano,n){ DB.seq[ano]=Math.max(DB.seq[ano]||0,n); }
+
+/* Substitui a lista local pelo que veio do servidor, preservando o que
+   ainda está na fila de envio (registros criados offline). */
+function aplicarDoServidor(pacote){
+  if(!pacote) return;
+  if(pacote.perfis){
+    DB.porteiros = pacote.perfis.map(p=>({
+      id:p.id, matricula:p.matricula, nome:p.nome, papel:p.papel,
+      assinId:p.id, ativo:p.ativo, criadoEm:p.criadoEm
+    }));
+    DB.assinaturas={};
+    pacote.perfis.forEach(p=>{ if(p.assinatura) DB.assinaturas[p.id]=p.assinatura; });
+    // Mantém o turno coerente se o gestor mexeu no cadastro.
+    if(DB.turno){
+      const meu=DB.porteiros.find(p=>p.id===DB.turno.perfilId);
+      if(meu){ DB.turno.porteiro=meu.nome; DB.turno.matricula=meu.matricula; }
+    }
+  }
+  if(pacote.registros){
+    const porId={};
+    if(!pacote.completo) DB.registros.forEach(r=>porId[r.id]=r);
+    else DB.registros.filter(r=>r.provisorio).forEach(r=>porId[r.id]=r);  // ainda não subiram
+    pacote.registros.forEach(x=>{
+      const antigo=porId[x.id];
+      // Não deixa a resposta do servidor apagar a auditoria já carregada.
+      if(antigo && antigo.auditoria && !x.auditoria) x.auditoria=antigo.auditoria;
+      porId[x.id]=x;
+    });
+    DB.registros=Object.values(porId);
+  }
+  dbSalvar();
+}
 
 /* ================================================================
    2. INTEGRIDADE (evidência de adulteração)
@@ -758,21 +895,29 @@ const CAMPOS_SELADOS=['numero','pessoa','documento','empresa','veiculo','placa',
                       'porteiroSaida','matriculaSaida','turnoSaida','status','observacoes'];
 
 function selo(r){
+  // A auditoria não entra: ela é carregada sob demanda do servidor e o
+  // selo precisa dar o mesmo resultado com ou sem ela em memória.
   const base=JSON.stringify(CAMPOS_SELADOS.map(k=>r[k]==null?'':String(r[k])))
            + JSON.stringify(r.confirmEntrada||null)
-           + JSON.stringify(r.confirmSaida||null)
-           + JSON.stringify((r.auditoria||[]).map(a=>a.ts+'|'+a.evento));
+           + JSON.stringify(r.confirmSaida||null);
   let h=0x811c9dc5;
   for(let i=0;i<base.length;i++){ h^=base.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
   return h.toString(16).padStart(8,'0');
 }
 function selar(r){ r.selo=selo(r); return r; }
-function integro(r){ return r.selo===selo(r); }
+function integro(r){ return !r.selo || r.selo===selo(r); }
 
 /* ================================================================
    3. UTILITÁRIOS
    ================================================================ */
-function uid(){ return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+/* Precisa ser UUID: é a chave primária da tabela no servidor. */
+function uid(){
+  if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+    const r=Math.random()*16|0, v=c==='x'?r:((r&0x3)|0x8);
+    return v.toString(16);
+  });
+}
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function p2(n){ return String(n).padStart(2,'0'); }
 
@@ -852,13 +997,17 @@ const ROTULO_SIT = {
    cálculo do selo, então apagar um evento na mão quebra a integridade.
    ================================================================ */
 function auditar(r,evento,detalhe){
-  r.auditoria=r.auditoria||[];
-  r.auditoria.push({
+  const ev={
     ts:new Date().toISOString(),
     evento:evento,
     detalhe:detalhe||'',
-    autor:(DB.turno&&DB.turno.porteiro)||r.porteiroEntrada||'—'
-  });
+    autor:(EU&&EU.nome)||r.porteiroEntrada||'—',
+    matricula:(EU&&EU.matricula)||''
+  };
+  // Anexa à cópia local só quando a trilha já foi carregada, para não
+  // criar um histórico "meia-boca" que depois substitui o do servidor.
+  if(Array.isArray(r.auditoria)) r.auditoria.push(ev);
+  PORTARIA.auditar(r.id, evento, detalhe||'');
 }
 
 /* ================================================================
@@ -937,13 +1086,23 @@ function acharPorteiro(mat){
   return DB.porteiros.find(p=>p.matricula===m)||null;
 }
 
-function novoPorteiro(){ formPorteiro(null); }
-function editarPorteiro(mat){ formPorteiro(acharPorteiro(mat)); }
+function novoPorteiro(){
+  if(!souGestor()){ showToast('Somente gestores cadastram porteiros.','error'); return; }
+  formPorteiro(null);
+}
+function editarPorteiro(mat){
+  const p=acharPorteiro(mat);
+  if(!p) return;
+  // Cada um pode ajustar o próprio cadastro; o gestor ajusta o de todos.
+  if(!souGestor() && p.id!==EU.id){ showToast('Você só pode editar o seu próprio cadastro.','error'); return; }
+  formPorteiro(p);
+}
 
 function formPorteiro(p){
   const novo=!p;
   const assinAtual = p ? (DB.assinaturas[p.assinId]||'') : '';
-  abrirModalCustom(novo?'Cadastrar porteiro':'Editar porteiro',
+  const podePapel = souGestor() && (!p || p.id!==EU.id);   // gestor não rebaixa a si mesmo pela tela
+  abrirModalCustom(novo?'Cadastrar porteiro':'Editar cadastro',
     '<div class="g2" style="margin-bottom:14px">'+
       '<div class="field">'+
         '<label>Matrícula <span class="req">*</span></label>'+
@@ -951,13 +1110,37 @@ function formPorteiro(p){
           (novo?'':'readonly ')+'placeholder="Ex.: 1042" autocomplete="off" '+
           'style="font-family:\'Courier New\',monospace;font-size:20px;font-weight:700;letter-spacing:.12em;text-align:center" '+
           'oninput="this.value=this.value.replace(/\\D/g,\'\')">'+
-        '<span class="hint">'+(novo?'Só números. Não pode repetir.':'A matrícula não pode ser trocada.')+'</span>'+
+        '<span class="hint">'+(novo?'Só números. É com ela que a pessoa entra no sistema.':'A matrícula não muda.')+'</span>'+
       '</div>'+
       '<div class="field">'+
         '<label>Nome completo <span class="req">*</span></label>'+
         '<input type="text" id="pNome" value="'+esc(p?p.nome:'')+'" placeholder="Nome do porteiro" autocomplete="off">'+
       '</div>'+
     '</div>'+
+    (novo
+      ? '<div class="g2" style="margin-bottom:14px">'+
+          '<div class="field">'+
+            '<label>Senha de acesso <span class="req">*</span></label>'+
+            '<input type="text" id="pSenha" placeholder="mínimo 8 caracteres" autocomplete="new-password">'+
+            '<span class="hint">Entregue a senha à pessoa. Ela pode trocar depois em "Minha conta".</span>'+
+          '</div>'+
+          '<div class="field">'+
+            '<label>Perfil</label>'+
+            '<select id="pPapel">'+
+              '<option value="porteiro">Porteiro — registra entradas e saídas</option>'+
+              '<option value="gestor">Gestor — também apaga registros e vê documentos</option>'+
+            '</select>'+
+          '</div>'+
+        '</div>'
+      : (podePapel
+          ? '<div class="field" style="margin-bottom:14px">'+
+              '<label>Perfil</label>'+
+              '<select id="pPapel">'+
+                '<option value="porteiro"'+(p.papel!=='gestor'?' selected':'')+'>Porteiro — registra entradas e saídas</option>'+
+                '<option value="gestor"'+(p.papel==='gestor'?' selected':'')+'>Gestor — também apaga registros e vê documentos</option>'+
+              '</select>'+
+            '</div>'
+          : ''))+
     (assinAtual
       ? '<div class="assin-card"><img src="'+assinAtual+'" alt="assinatura"/>'+
         '<div class="who"><div class="k">Assinatura cadastrada</div>'+
@@ -967,7 +1150,7 @@ function formPorteiro(p){
       '<label>Assinatura '+(assinAtual?'(nova, opcional)':'<span class="req">*</span>')+'</label>'+
       htmlPad('pAssin')+
       '<span class="hint">Assine com o dedo (tela sensível) ou com o mouse. '+
-      'Esta assinatura sai nos PDFs de todas as entradas liberadas por ele.</span>'+
+      'Esta assinatura sai nos PDFs de todas as entradas liberadas por ela.</span>'+
     '</div>',
     [{txt:'Cancelar',cls:'btn-outline',fn:()=>{ fecharModal(); }},
      {txt:novo?'Cadastrar':'Salvar',cls:'btn-red',fn:()=>salvarPorteiro(novo?null:p.matricula)}]);
@@ -978,9 +1161,10 @@ function formPorteiro(p){
   },60);
 }
 
-function salvarPorteiro(matOriginal){
+async function salvarPorteiro(matOriginal){
   const mat=normalizarMatricula(document.getElementById('pMat').value);
   const nome=(document.getElementById('pNome').value||'').trim();
+  const selPapel=document.getElementById('pPapel');
   const novo=!matOriginal;
 
   if(!mat){ showToast('Informe a matrícula.','error'); return; }
@@ -988,146 +1172,139 @@ function salvarPorteiro(matOriginal){
   if(novo && acharPorteiro(mat)){ showToast('Já existe porteiro com a matrícula '+mat+'.','error'); return; }
 
   const desenhou = PAD && !PAD.vazio();
-  let p = novo ? null : acharPorteiro(matOriginal);
+  const imagem   = desenhou ? PAD.imagem() : null;
 
-  if(novo){
-    if(!desenhou){ showToast('Falta assinar no quadro branco.','error'); return; }
-    const aid='p'+mat+'.'+Date.now().toString(36);
-    DB.assinaturas[aid]=PAD.imagem();
-    DB.porteiros.push({ matricula:mat, nome:nome, assinId:aid, ativo:true, criadoEm:new Date().toISOString() });
-  }else{
-    p.nome=nome;
-    if(desenhou){
-      // Assinatura antiga fica guardada: registros antigos continuam apontando para ela.
-      const aid='p'+p.matricula+'.'+Date.now().toString(36);
-      DB.assinaturas[aid]=PAD.imagem();
-      p.assinId=aid;
+  try{
+    if(novo){
+      const senha=(document.getElementById('pSenha').value||'');
+      if(senha.length<8){ showToast('A senha precisa ter pelo menos 8 caracteres.','error'); return; }
+      if(!desenhou){ showToast('Falta assinar no quadro branco.','error'); return; }
+      showToast('Criando acesso…');
+      await PORTARIA.criarPorteiro({ matricula:mat, nome, senha,
+                                     papel:selPapel?selPapel.value:'porteiro', assinatura:imagem });
+    }else{
+      const p=acharPorteiro(matOriginal);
+      const campos={ nome };
+      if(desenhou) campos.assinatura=imagem;
+      if(selPapel) campos.papel=selPapel.value;
+      await PORTARIA.salvarPerfil(p.id, campos);
     }
+    PAD=null;
+    fecharModal();
+    await recarregarDoServidor();
+    showToast(novo?('Porteiro '+mat+' cadastrado.'):'Cadastro atualizado.','success');
+  }catch(e){
+    showToast(e.message||'Não consegui salvar o cadastro.','error');
   }
-  PAD=null;
-  if(!dbSalvar()) return;
-
-  // Turno em andamento do mesmo porteiro passa a usar os dados novos.
-  if(DB.turno && DB.turno.matricula===(novo?mat:matOriginal)){
-    const at=acharPorteiro(DB.turno.matricula);
-    DB.turno.porteiro=at.nome; DB.turno.assinId=at.assinId;
-    dbSalvar();
-  }
-  fecharModal(); renderTurno(); renderTudo();
-  showToast(novo?('Porteiro '+mat+' cadastrado.'):'Cadastro atualizado.','success');
 }
 
-function alternarAtivoPorteiro(mat){
+async function alternarAtivoPorteiro(mat){
+  if(!souGestor()){ showToast('Somente gestores ativam ou desativam.','error'); return; }
   const p=acharPorteiro(mat); if(!p) return;
-  if(p.ativo && DB.turno && DB.turno.matricula===p.matricula){
-    showToast('Este porteiro está em turno. Encerre o turno antes de desativar.','error'); return;
-  }
-  p.ativo=!p.ativo;
-  if(!dbSalvar()) return;
-  renderTudo();
-  showToast(p.nome+(p.ativo?' reativado.':' desativado.'));
+  if(p.id===EU.id){ showToast('Você não pode desativar o seu próprio acesso.','error'); return; }
+  try{
+    await PORTARIA.salvarPerfil(p.id, { ativo: !p.ativo });
+    await recarregarDoServidor();
+    showToast(p.nome+(!p.ativo?' reativado.':' desativado.'));
+  }catch(e){ showToast(e.message||'Não consegui alterar.','error'); }
 }
 
-function excluirPorteiro(mat){
+async function excluirPorteiro(mat){
+  if(!souGestor()){ showToast('Somente gestores apagam cadastros.','error'); return; }
   const p=acharPorteiro(mat); if(!p) return;
+  if(p.id===EU.id){ showToast('Você não pode apagar o seu próprio cadastro.','error'); return; }
   const usos=DB.registros.filter(r=>r.matriculaEntrada===p.matricula||r.matriculaSaida===p.matricula).length;
   if(usos){
     showToast('Não dá para apagar: '+p.nome+' aparece em '+usos+' registro(s).\nUse "Desativar".','error');
     return;
   }
-  if(DB.turno && DB.turno.matricula===p.matricula){ showToast('Encerre o turno deste porteiro primeiro.','error'); return; }
-  if(!confirm('Apagar o cadastro de '+p.nome+' (matrícula '+p.matricula+')?')) return;
-  delete DB.assinaturas[p.assinId];
-  DB.porteiros=DB.porteiros.filter(x=>x.matricula!==p.matricula);
-  if(!dbSalvar()) return;
-  renderTudo();
-  showToast('Cadastro apagado.');
+  if(!confirm('Apagar o cadastro de '+p.nome+' (matrícula '+p.matricula+')?\n\n'+
+              'O acesso dele ao sistema deixa de funcionar.')) return;
+  try{
+    await PORTARIA.apagarPerfil(p.id);
+    await recarregarDoServidor();
+    showToast('Cadastro apagado.');
+  }catch(e){ showToast(e.message||'Não consegui apagar.','error'); }
+}
+
+/* ---- Minha conta: trocar a própria senha ---- */
+function abrirMinhaConta(){
+  if(!EU) return;
+  const img=DB.assinaturas[EU.id]||EU.assinatura||'';
+  abrirModalCustom('Minha conta',
+    '<div class="assin-card">'+(img?'<img src="'+img+'" alt="assinatura"/>':'')+
+      '<div class="who"><div class="k">Matrícula '+esc(EU.matricula)+'</div>'+
+      '<div class="v">'+esc(EU.nome)+'</div>'+
+      '<div class="t">'+(EU.papel==='gestor'?'Gestor':'Porteiro')+'</div></div></div>'+
+    '<div class="sec-title">Trocar minha senha</div>'+
+    '<div class="field" style="margin-bottom:12px">'+
+      '<label>Nova senha</label>'+
+      '<input type="password" id="cSenha1" autocomplete="new-password" placeholder="mínimo 8 caracteres">'+
+    '</div>'+
+    '<div class="field">'+
+      '<label>Repita a nova senha</label>'+
+      '<input type="password" id="cSenha2" autocomplete="new-password">'+
+    '</div>',
+    [{txt:'Editar meu cadastro',cls:'btn-outline',fn:()=>editarPorteiro(EU.matricula)},
+     {txt:'Trocar senha',cls:'btn-red',fn:trocarMinhaSenha},
+     {txt:'Fechar',cls:'btn-dark',fn:fecharModal}]);
+}
+
+async function trocarMinhaSenha(){
+  const a=document.getElementById('cSenha1').value;
+  const b=document.getElementById('cSenha2').value;
+  if(a.length<8){ showToast('A senha precisa ter pelo menos 8 caracteres.','error'); return; }
+  if(a!==b){ showToast('As duas senhas não são iguais.','error'); return; }
+  try{
+    await PORTARIA.trocarSenha(a);
+    fecharModal();
+    showToast('Senha trocada.','success');
+  }catch(e){ showToast(e.message||'Não consegui trocar a senha.','error'); }
 }
 
 function renderPorteiros(){
-  const lista=DB.porteiros.slice().sort((a,b)=>a.matricula.localeCompare(b.matricula,'pt-BR',{numeric:true}));
+  const lista=DB.porteiros.slice().sort((a,b)=>String(a.matricula).localeCompare(String(b.matricula),'pt-BR',{numeric:true}));
   const el=document.getElementById('listaPorteiros');
+  const gestor=souGestor();
+
   el.innerHTML = lista.length ? lista.map(p=>{
     const img=DB.assinaturas[p.assinId]||'';
-    const emTurno = DB.turno && DB.turno.matricula===p.matricula;
+    const souEu = EU && p.id===EU.id;
+    const emTurno = DB.turno && DB.turno.perfilId===p.id;
+    const podeEditar = gestor || souEu;
     return '<div class="rec '+(p.ativo?'s-out':'')+'" style="cursor:default">'+
       '<div class="rec-status" style="'+(p.ativo?'':'background:var(--surface2);color:var(--muted)')+'">'+
         '<span class="dot"></span>'+(p.ativo?'Ativo':'Desativado')+
+        (p.papel==='gestor'?'<span class="bdg b-late" style="margin-left:8px">GESTOR</span>':'')+
         (emTurno?'<span class="bdg b-in" style="margin-left:8px">EM TURNO AGORA</span>':'')+
+        (souEu?'<span class="bdg b-out" style="margin-left:8px">VOCÊ</span>':'')+
       '</div>'+
       '<div class="rec-in">'+
         '<div class="rec-top">'+
           '<span class="bdg plate">'+esc(p.matricula)+'</span>'+
           '<span class="rec-nome">'+esc(p.nome)+'</span>'+
-          (img?'<img src="'+img+'" alt="assinatura" style="margin-left:auto;height:44px;width:auto;max-width:150px;object-fit:contain;background:#fff;border:1px solid var(--border);border-radius:6px;padding:2px 6px"/>':'')+
+          (img?'<img src="'+img+'" alt="assinatura" style="margin-left:auto;height:44px;width:auto;max-width:150px;object-fit:contain;background:#fff;border:1px solid var(--border);border-radius:6px;padding:2px 6px"/>'
+              :'<span class="bdg b-warn" style="margin-left:auto">SEM ASSINATURA</span>')+
         '</div>'+
-        '<div class="rec-acts">'+
-          '<button class="btn btn-outline btn-sm" onclick="editarPorteiro(\''+p.matricula+'\')">Editar / trocar assinatura</button>'+
-          '<button class="btn btn-outline btn-sm" onclick="alternarAtivoPorteiro(\''+p.matricula+'\')">'+(p.ativo?'Desativar':'Reativar')+'</button>'+
-          '<button class="btn btn-outline btn-sm" onclick="excluirPorteiro(\''+p.matricula+'\')">Apagar</button>'+
-        '</div>'+
+        (podeEditar||gestor ? '<div class="rec-acts">'+
+          (podeEditar?'<button class="btn btn-outline btn-sm" onclick="editarPorteiro(\''+p.matricula+'\')">Editar / trocar assinatura</button>':'')+
+          (gestor&&!souEu?'<button class="btn btn-outline btn-sm" onclick="alternarAtivoPorteiro(\''+p.matricula+'\')">'+(p.ativo?'Desativar':'Reativar')+'</button>':'')+
+          (gestor&&!souEu?'<button class="btn btn-outline btn-sm" onclick="excluirPorteiro(\''+p.matricula+'\')">Apagar</button>':'')+
+        '</div>' : '')+
       '</div>'+
     '</div>';
-  }).join('') : '<div class="empty-state">Nenhum porteiro cadastrado ainda.<br>Clique em <b>Cadastrar porteiro</b> para começar.</div>';
+  }).join('') : '<div class="empty-state">Nenhum porteiro cadastrado ainda.</div>';
 
   const ativos=lista.filter(p=>p.ativo).length;
   document.getElementById('pillPorteiros').textContent=ativos+' ativo(s) de '+lista.length;
   const n=document.getElementById('nPorteiros');
   n.textContent=lista.length; n.className='n '+(lista.length?'out':'zero');
-}
 
-/* Cadastro portátil entre computadores da portaria (JSON com as assinaturas,
-   ou CSV simples "matricula;nome" para dar carga inicial rápida). */
-function exportarPorteiros(){
-  const assin={};
-  DB.porteiros.forEach(p=>{ if(DB.assinaturas[p.assinId]) assin[p.assinId]=DB.assinaturas[p.assinId]; });
-  baixarArquivo('Portaria-Porteiros-'+new Date().toISOString().slice(0,10)+'.json',
-                JSON.stringify({ tipo:'porteiros', porteiros:DB.porteiros, assinaturas:assin },null,2),
-                'application/json');
-  showToast('Cadastro salvo na pasta de downloads.','success');
-}
-
-function importarPorteiros(input){
-  const f=input.files&&input.files[0];
-  input.value='';
-  if(!f) return;
-  const csv=/\.csv$/i.test(f.name);
-  const fr=new FileReader();
-  fr.onload=()=>{
-    let entrada=[], assin={};
-    if(csv){
-      // "matricula;nome" (ou vírgula). Sem assinatura — cada um assina depois.
-      String(fr.result).split(/\r?\n/).forEach((ln,i)=>{
-        const t=ln.trim(); if(!t) return;
-        const c=t.split(/[;,\t]/);
-        const mat=normalizarMatricula(c[0]), nome=(c[1]||'').trim();
-        if(i===0 && !mat) return;                 // cabeçalho
-        if(mat && nome.length>=3) entrada.push({matricula:mat,nome:nome,assinId:'',ativo:true,criadoEm:new Date().toISOString()});
-      });
-    }else{
-      let o; try{ o=JSON.parse(fr.result); }catch(e){ showToast('Arquivo inválido.','error'); return; }
-      if(!o||!Array.isArray(o.porteiros)){ showToast('Este arquivo não é um cadastro de porteiros.','error'); return; }
-      entrada=o.porteiros; assin=o.assinaturas||{};
-    }
-    if(!entrada.length){ showToast('Nenhum porteiro encontrado no arquivo.','error'); return; }
-
-    const existentes=new Set(DB.porteiros.map(p=>p.matricula));
-    const novos=entrada.filter(p=>p&&p.matricula&&!existentes.has(String(p.matricula)));
-    if(!confirm('O arquivo tem '+entrada.length+' porteiro(s).\n'+
-                novos.length+' serão acrescentados; '+(entrada.length-novos.length)+' já existem e serão ignorados.\n\nContinuar?')) return;
-
-    Object.assign(DB.assinaturas,assin);
-    novos.forEach(p=>DB.porteiros.push({
-      matricula:String(p.matricula), nome:String(p.nome||'').trim(),
-      assinId:p.assinId||'', ativo:p.ativo!==false, criadoEm:p.criadoEm||new Date().toISOString()
-    }));
-    if(!dbSalvar()) return;
-    renderTudo();
-    const semAssin=novos.filter(p=>!p.assinId||!DB.assinaturas[p.assinId]).length;
-    showToast(novos.length+' porteiro(s) carregados.'+(semAssin?'\n'+semAssin+' ainda precisam assinar (Editar).':''),'success');
-  };
-  fr.onerror=()=>showToast('Não consegui ler o arquivo.','error');
-  fr.readAsText(f);
+  // Ações de cadastro são de gestor.
+  const cx=document.getElementById('acoesPorteiros');
+  if(cx) cx.style.display = gestor ? '' : 'none';
+  const av=document.getElementById('avisoPorteiros');
+  if(av) av.style.display = gestor ? '' : 'none';
 }
 
 /* ================================================================
@@ -1139,72 +1316,48 @@ function importarPorteiros(input){
    ================================================================ */
 function alternarTurno(){ DB.turno ? encerrarTurno() : abrirTurno(); }
 
+/* Sugere a escala pelo horário atual — menos um campo para pensar. */
+function turnoSugerido(){
+  const h=new Date().getHours();
+  const diurno = h>=7 && h<19;
+  return CONFIG.TURNOS[diurno?0:(CONFIG.TURNOS.length>1?1:0)];
+}
+
 function abrirTurno(){
-  const ativos=DB.porteiros.filter(p=>p.ativo);
-  if(!ativos.length){
-    abrirModalCustom('Nenhum porteiro cadastrado',
-      '<div class="warn-box w">Antes de começar o turno é preciso cadastrar pelo menos um porteiro, '+
-      'com matrícula, nome completo e assinatura.</div>',
+  if(!EU){ showToast('Entre com sua matrícula primeiro.','error'); return; }
+  const img=DB.assinaturas[EU.id]||EU.assinatura||'';
+  if(!img){
+    abrirModalCustom('Falta sua assinatura',
+      '<div class="warn-box w">Seu cadastro ainda não tem assinatura. Ela é obrigatória, '+
+      'porque sai nos documentos de todas as entradas que você liberar.</div>',
       [{txt:'Agora não',cls:'btn-outline',fn:fecharModal},
-       {txt:'Cadastrar porteiro',cls:'btn-red',fn:()=>{ irPara('porteiros'); novoPorteiro(); }}]);
+       {txt:'Assinar agora',cls:'btn-red',fn:()=>editarPorteiro(EU.matricula)}]);
     return;
   }
-  const opts=CONFIG.TURNOS.map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join('');
+  const sug=turnoSugerido();
+  const opts=CONFIG.TURNOS.map(t=>'<option value="'+esc(t)+'"'+(t===sug?' selected':'')+'>'+esc(t)+'</option>').join('');
   abrirModalCustom('Começar turno',
-    '<div class="field" style="margin-bottom:14px">'+
-      '<label>Digite sua matrícula <span class="req">*</span></label>'+
-      '<input type="text" id="tMat" inputmode="numeric" maxlength="10" placeholder="0000" autocomplete="off" '+
-        'style="font-family:\'Courier New\',monospace;font-size:26px;font-weight:700;letter-spacing:.18em;text-align:center" '+
-        'oninput="this.value=this.value.replace(/\\D/g,\'\');buscarMatricula()">'+
-    '</div>'+
-    '<div id="tAchado" style="margin-bottom:14px"></div>'+
+    '<div class="assin-card"><img src="'+img+'" alt="assinatura"/>'+
+      '<div class="who"><div class="k">Matrícula '+esc(EU.matricula)+'</div>'+
+      '<div class="v">'+esc(EU.nome)+'</div>'+
+      '<div class="t">Assinatura cadastrada</div></div></div>'+
     '<div class="field">'+
-      '<label>Turno <span class="req">*</span></label>'+
+      '<label>Qual turno você está assumindo? <span class="req">*</span></label>'+
       '<select id="tTurno">'+opts+'</select>'+
+      '<span class="hint">Já veio marcado pelo horário. Só mude se estiver diferente.</span>'+
     '</div>',
     [{txt:'Cancelar',cls:'btn-outline',fn:fecharModal},
      {txt:'Começar turno',cls:'btn-green',fn:confirmarAbrirTurno}]);
-  buscarMatricula();
-  setTimeout(()=>{ const el=document.getElementById('tMat'); if(el) el.focus(); },60);
-}
-
-/* Busca ao vivo: assim que a matrícula bate, mostra nome e assinatura. */
-function buscarMatricula(){
-  const el=document.getElementById('tMat'); if(!el) return;
-  const alvo=document.getElementById('tAchado');
-  const mat=normalizarMatricula(el.value);
-  if(!mat){ alvo.innerHTML='<div class="warn-box i">Digite o número da sua matrícula.</div>'; return; }
-  const p=acharPorteiro(mat);
-  if(!p){
-    alvo.innerHTML='<div class="warn-box e">Matrícula <b>'+esc(mat)+'</b> não está cadastrada.</div>';
-    return;
-  }
-  if(!p.ativo){
-    alvo.innerHTML='<div class="warn-box e"><b>'+esc(p.nome)+'</b> está desativado no cadastro.</div>';
-    return;
-  }
-  const img=DB.assinaturas[p.assinId]||'';
-  alvo.innerHTML='<div class="assin-card" style="margin-bottom:0">'+
-    (img?'<img src="'+img+'" alt="assinatura"/>':'')+
-    '<div class="who"><div class="k">Matrícula '+esc(p.matricula)+'</div>'+
-    '<div class="v">'+esc(p.nome)+'</div>'+
-    (img?'<div class="t">Assinatura cadastrada</div>':'<div class="t" style="color:var(--st-late)">Sem assinatura — cadastre em Porteiros</div>')+
-    '</div></div>';
 }
 
 function confirmarAbrirTurno(){
-  const mat=normalizarMatricula(document.getElementById('tMat').value);
+  if(!EU) return;
   const turno=document.getElementById('tTurno').value;
-  const p=acharPorteiro(mat);
-  if(!p){ showToast('Matrícula não cadastrada.','error'); document.getElementById('tMat').focus(); return; }
-  if(!p.ativo){ showToast('Este porteiro está desativado no cadastro.','error'); return; }
-  if(!DB.assinaturas[p.assinId]){ showToast('Este porteiro ainda não tem assinatura cadastrada.','error'); return; }
-
-  DB.turno={ matricula:p.matricula, porteiro:p.nome, turno:turno,
-             inicio:new Date().toISOString(), assinId:p.assinId };
-  if(!dbSalvar()) return;
+  DB.turno={ perfilId:EU.id, matricula:EU.matricula, porteiro:EU.nome, turno:turno,
+             inicio:new Date().toISOString(), assinId:EU.id };
+  dbSalvar();
   fecharModal(); renderTurno();
-  showToast('Turno começado — '+p.nome,'success');
+  showToast('Turno começado — '+EU.nome,'success');
 }
 
 function encerrarTurno(){
@@ -1284,7 +1437,7 @@ function limparFormulario(perguntar){
   agoraNoCampo('fEntrada');
 }
 
-function salvarEntrada(){
+async function salvarEntrada(){
   limparErros();
   if(!DB.turno){ showToast('Comece o turno antes de registrar entradas.','error'); return; }
 
@@ -1338,10 +1491,20 @@ function salvarEntrada(){
   if(dup && !confirm('A placa '+placaBonita(placa)+' JÁ ESTÁ DENTRO ('+dup.numero+' — '+dup.pessoa+
                      ', entrou '+fmtDT(dup.entrada)+').\n\nRegistrar mesmo assim?')) return;
 
-  /* ---- Grava ---- */
-  const seq=proximoNumero(new Date(entradaIso));
+  /* ---- Grava ----
+     Com internet, o número definitivo vem do servidor agora mesmo (nunca
+     repete entre aparelhos). Sem internet, entra um número provisório e o
+     definitivo é atribuído no envio. */
+  let numero=null, provisorio=false;
+  try{ numero=await PORTARIA.numeroNovo(); }catch(e){ numero=null; }
+  if(!numero){
+    numero=numeroProvisorio(); provisorio=true;
+    if(!confirm('Sem conexão com o servidor agora.\n\nA entrada será registrada neste aparelho com o '+
+                'número provisório '+numero+' e enviada assim que a internet voltar.\n\nContinuar?')) return;
+  }
+
   const r={
-    id:uid(), numero:seq.numero, status:'aberto',
+    id:uid(), numero:numero, provisorio:provisorio, status:'aberto',
     pessoa, documento, empresa, veiculo, placa,
     entrada:entradaIso, saida:null,
     setor, autorizador,
@@ -1355,18 +1518,35 @@ function salvarEntrada(){
     criadoEm:new Date().toISOString(),
     auditoria:[]
   };
-  auditar(r,'ENTRADA LIBERADA','Placa '+placaBonita(placa)+' · autorizado por '+setor+' / '+autorizador+
-                               (dup?' · ATENÇÃO: placa já estava dentro ('+dup.numero+')':''));
+  // O documento completo fica na memória só até o envio; depois a tela
+  // passa a mostrar apenas a máscara devolvida pelo servidor.
+  r.documentoMascarado = documento ? mascarar(documento) : '';
   selar(r);
 
-  consumirNumero(seq.ano,seq.n);
   DB.registros.push(r);
   DB.rascunho=null;
-  if(!dbSalvar()) return;
+
+  // A fila leva o documento; a cópia local não. Por isso o envio é
+  // enfileirado ANTES de limpar o campo e de gravar o cache.
+  PORTARIA.criarRegistro(r);
+  auditar(r,'ENTRADA LIBERADA','Placa '+placaBonita(placa)+' · autorizado por '+setor+' / '+autorizador+
+                               (dup?' · ATENÇÃO: placa já estava dentro ('+dup.numero+')':''));
+  r.documento='';
+  dbSalvar();
 
   limparFormulario(false);
   renderTudo();
-  showToast('Entrada liberada — '+r.numero,'success');
+  showToast(provisorio ? ('Entrada registrada neste aparelho — '+r.numero+'\nSerá enviada quando a internet voltar.')
+                       : ('Entrada liberada — '+r.numero),'success');
+}
+
+/* Mesma máscara aplicada pelo servidor, para a tela não "piscar" o
+   documento entre o registro e a primeira sincronização. */
+function mascarar(v){
+  const s=String(v||'').trim();
+  if(!s) return '';
+  if(s.length<=4) return '•'.repeat(s.length);
+  return '•'.repeat(s.length-4)+s.slice(-4);
 }
 
 /* ================================================================
@@ -1422,10 +1602,12 @@ function confirmarSaida(id){
   if(obs) r.observacoes=(r.observacoes?r.observacoes+'\n':'')+'[Saída] '+obs;
   r.confirmSaida={ nome:DB.turno.porteiro, matricula:DB.turno.matricula, ts:new Date().toISOString(),
                    termo:CONFIG.TERMO_SAIDA, assinId:DB.turno.assinId };
-  auditar(r,'SAÍDA REGISTRADA','Ficou dentro '+duracao(permanenciaMs(r))+(obs?' · '+obs:''));
   selar(r);
+  dbSalvar();
 
-  if(!dbSalvar()) return;
+  PORTARIA.atualizarRegistro(r);
+  auditar(r,'SAÍDA REGISTRADA','Ficou dentro '+duracao(permanenciaMs(r))+(obs?' · '+obs:''));
+
   fecharModal(); renderTudo();
   showToast('Saída registrada — '+r.numero,'success');
 }
@@ -1437,9 +1619,10 @@ function reabrir(id){
   if(j===null) return;
   if(j.trim().length<10){ showToast('Escreva o motivo com mais detalhe.','error'); return; }
   r.status='aberto'; r.saida=null; r.porteiroSaida=null; r.matriculaSaida=null; r.turnoSaida=null; r.confirmSaida=null;
-  auditar(r,'REGISTRO REABERTO',j.trim());
   selar(r);
-  if(!dbSalvar()) return;
+  dbSalvar();
+  PORTARIA.atualizarRegistro(r);
+  auditar(r,'REGISTRO REABERTO',j.trim());
   fecharModal(); renderTudo();
   showToast('Registro '+r.numero+' reaberto.');
 }
@@ -1455,7 +1638,12 @@ function editar(id){
       inp('ePessoa','Nome de quem entrou',r.pessoa)+inp('eEmpresa','Empresa',r.empresa)+
     '</div>'+
     '<div class="g2" style="margin-bottom:14px">'+
-      inp('eDocumento','Documento',r.documento)+inp('eVeiculo','Modelo e cor do carro',r.veiculo)+
+      '<div class="field"><label>Documento</label>'+
+        '<input type="text" id="eDocumento" value="" placeholder="'+
+          (r.documentoMascarado?esc(r.documentoMascarado)+' — deixe em branco para manter':'não informado')+'">'+
+        '<span class="hint">Por segurança o documento não é exibido. Preencha só se for corrigir.</span>'+
+      '</div>'+
+      inp('eVeiculo','Modelo e cor do carro',r.veiculo)+
     '</div>'+
     '<div class="g2" style="margin-bottom:14px">'+
       inp('ePlaca','Placa',r.placa)+
@@ -1472,10 +1660,10 @@ function editar(id){
 
 function salvarEdicao(id){
   const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  const docNovo=document.getElementById('eDocumento').value.trim();
   const novo={
     pessoa:document.getElementById('ePessoa').value.trim(),
     empresa:document.getElementById('eEmpresa').value.trim(),
-    documento:document.getElementById('eDocumento').value.trim(),
     veiculo:document.getElementById('eVeiculo').value.trim(),
     placa:normalizarPlaca(document.getElementById('ePlaca').value),
     entrada:fromInputDT(document.getElementById('eEntrada').value),
@@ -1489,7 +1677,7 @@ function salvarEdicao(id){
   if(!novo.entrada){ showToast('Dia e hora da entrada inválidos.','error'); return; }
   if(new Date(novo.entrada)-new Date() > CONFIG.TOLERANCIA_FUTURO_MIN*60000){ showToast('A hora da entrada não pode ser depois de agora.','error'); return; }
 
-  const rotulos={pessoa:'Nome',empresa:'Empresa',documento:'Documento',veiculo:'Carro',
+  const rotulos={pessoa:'Nome',empresa:'Empresa',veiculo:'Carro',
                  placa:'Placa',entrada:'Entrada',setor:'Setor',autorizador:'Autorizador',observacoes:'Anotações'};
   const mudou=[];
   Object.keys(novo).forEach(k=>{
@@ -1499,23 +1687,35 @@ function salvarEdicao(id){
       r[k]=novo[k];
     }
   });
+  // Documento: só muda se algo foi digitado. O valor em si nunca entra na
+  // auditoria — só o fato de ter sido trocado.
+  if(docNovo){
+    r.documento=docNovo;
+    r.documentoMascarado=mascarar(docNovo);
+    mudou.push('Documento: substituído');
+  }
   if(!mudou.length){ showToast('Nada foi alterado.'); verRegistro(id); return; }
 
-  auditar(r,'REGISTRO CORRIGIDO',mudou.join(' · '));
   selar(r);
-  if(!dbSalvar()) return;
+  PORTARIA.atualizarRegistro(r);              // a fila leva o documento novo
+  auditar(r,'REGISTRO CORRIGIDO',mudou.join(' · '));
+  r.documento='';                             // a cópia local, não
+  dbSalvar();
+
   renderTudo(); verRegistro(id);
   showToast('Correção salva.','success');
 }
 
 function excluir(id){
   const r=DB.registros.find(x=>x.id===id); if(!r) return;
-  if(!confirm('APAGAR o registro '+r.numero+' para sempre?\n\nNão dá para desfazer.')) return;
+  if(!souGestor()){ showToast('Somente gestores apagam registros.','error'); return; }
+  if(!confirm('APAGAR o registro '+r.numero+' para sempre?\n\nApaga também a trilha de auditoria dele. Não dá para desfazer.')) return;
   const conf=prompt('Para confirmar, escreva o número do registro:','');
   if(conf===null) return;
   if(chave(conf)!==chave(r.numero)){ showToast('Número não confere. Nada foi apagado.','error'); return; }
   DB.registros=DB.registros.filter(x=>x.id!==id);
-  if(!dbSalvar()) return;
+  dbSalvar();
+  PORTARIA.apagarRegistro(id);
   fecharModal(); renderTudo();
   showToast('Registro '+r.numero+' apagado.');
 }
@@ -1534,7 +1734,8 @@ function cartaoRegistro(r){
   const s=situacao(r);
   const perm=duracao(permanenciaMs(r));
   const tempoTxt = r.status==='aberto' ? 'Dentro há '+perm : 'Ficou '+perm;
-  const alerta = !integro(r) ? '<span class="bdg b-late" style="margin-left:8px">DADOS ALTERADOS</span>' : '';
+  let alerta = !integro(r) ? '<span class="bdg b-late" style="margin-left:8px">DADOS ALTERADOS</span>' : '';
+  if(r.provisorio) alerta+='<span class="bdg b-fila" style="margin-left:8px">AGUARDANDO ENVIO</span>';
 
   const acoes = r.status==='aberto'
     ? '<button class="btn btn-green btn-sm" onclick="event.stopPropagation();registrarSaida(\''+r.id+'\')">'+
@@ -1574,7 +1775,7 @@ function casa(r,q){
   if(!q) return true;
   const t=chave(q);
   return [r.numero,r.pessoa,r.empresa,r.placa,placaBonita(r.placa),r.autorizador,r.setor,
-          r.porteiroEntrada,r.porteiroSaida,r.documento,r.veiculo,r.observacoes]
+          r.porteiroEntrada,r.porteiroSaida,r.veiculo,r.observacoes]
          .some(v=>chave(v).includes(t));
 }
 
@@ -1691,14 +1892,37 @@ function renderDatalists(){
 }
 
 function renderEspaco(){
-  let bytes=0;
-  try{ bytes=(localStorage.getItem(CONFIG.DB_KEY)||'').length*2; }catch(e){}
-  const kb=Math.round(bytes/1024);
-  const pct=Math.min(100,Math.round(kb/5120*100));
+  const pend=PORTARIA.pendentes;
   document.getElementById('usoEspaco').innerHTML=
-    '<span>Espaço usado: <b>'+kb+' KB</b> (cerca de '+pct+'% do limite do navegador)</span>'+
-    '<span>Registros guardados: <b>'+DB.registros.length+'</b></span>'+
+    '<span>Registros no servidor: <b>'+DB.registros.filter(r=>!r.provisorio).length+'</b></span>'+
+    '<span>Esperando envio: <b>'+pend+'</b></span>'+
     '<span>Porteiros cadastrados: <b>'+DB.porteiros.length+'</b></span>';
+  const b=document.getElementById('btnLGPD');
+  if(b) b.style.display = souGestor() ? '' : 'none';
+}
+
+/* ---- Barra de usuário e situação da sincronização ---- */
+function renderUsuario(){
+  if(!EU) return;
+  document.getElementById('userNome').textContent=EU.nome+'  ·  mat. '+EU.matricula;
+  const pp=document.getElementById('userPapel');
+  pp.textContent = EU.papel==='gestor' ? 'Gestor' : 'Porteiro';
+  pp.className = 'user-papel'+(EU.papel==='gestor'?' gestor':'');
+}
+
+function renderSync(info){
+  const box=document.getElementById('syncBox');
+  const txt=document.getElementById('syncTxt');
+  if(!box) return;
+  const pend=info && info.pendentes || 0;
+  const est=(info && info.estado) || PORTARIA.estado;
+  let cls='off', msg='Sem conexão';
+  if(est==='ok' && !pend){ cls='ok';   msg='Tudo sincronizado'; }
+  else if(est==='sincronizando'){ cls='sinc'; msg='Sincronizando…'; }
+  else if(est==='erro'){ cls='erro'; msg=(info&&info.erro)||'Erro de sincronização'; }
+  else if(pend){ cls='off'; msg=pend+' esperando envio'; }
+  box.className='sync '+cls;
+  txt.textContent=msg;
 }
 
 function renderTudo(){
@@ -1731,13 +1955,23 @@ function verRegistro(id){
 
   let avisos='<div class="warn-box '+caixa+'"><b>'+esc(ROTULO_SIT[s].toUpperCase())+'</b> — '+
              (r.status==='aberto'?'dentro há ':'ficou ')+duracao(permanenciaMs(r))+'.</div>';
-  if(!integro(r)) avisos+='<div class="warn-box e">Este registro foi alterado por fora do sistema. Não confie nos dados sem conferir o histórico abaixo.</div>';
+  if(r.provisorio) avisos+='<div class="warn-box w">Registro feito sem internet. Ainda não subiu para o servidor, '+
+                           'e o número <b>'+esc(r.numero)+'</b> é provisório.</div>';
+  if(!integro(r)) avisos+='<div class="warn-box e">Os dados deste registro não conferem com o selo gravado. Verifique o histórico abaixo.</div>';
+
+  // O documento completo não vem do servidor: a tela recebe só a máscara.
+  const docHtml = !r.documentoMascarado ? '—'
+    : '<span class="doc-mask"><span class="val" id="docVal">'+esc(r.documentoMascarado)+'</span>'+
+      (souGestor()&&!r.provisorio
+        ? '<button class="btn btn-outline btn-sm" type="button" onclick="verDocumento(\''+r.id+'\')">Ver completo</button>'
+        : '')+'</span>';
 
   const html = avisos+
     '<div class="sec-title">Quem entrou e com qual carro</div>'+
     '<div class="kv">'+
       kvItem('Número do registro',r.numero)+kvItem('Nome',r.pessoa)+
-      kvItem('Empresa',r.empresa)+kvItem('Documento',r.documento)+
+      kvItem('Empresa',r.empresa)+
+      '<div><div class="k">Documento</div><div class="v">'+docHtml+'</div></div>'+
       kvItem('Placa',placaBonita(r.placa))+kvItem('Carro',r.veiculo)+
     '</div>'+
     '<div class="sec-title">Entrada e saída</div>'+
@@ -1758,10 +1992,7 @@ function verRegistro(id){
     blocoConfirm('Entrada',r.confirmEntrada)+
     blocoConfirm('Saída',r.confirmSaida)+
     '<div class="sec-title">Histórico do registro</div>'+
-    '<ul class="audit">'+(r.auditoria||[]).map(a=>
-      '<li><span class="ts">'+fmtDT(a.ts)+'</span> — <b>'+esc(a.evento)+'</b>'+
-      (a.detalhe?'<br>'+esc(a.detalhe):'')+
-      '<br><span style="font-size:11.5px">por '+esc(a.autor)+'</span></li>').join('')+'</ul>';
+    '<div id="trilha">'+htmlTrilha(r.auditoria)+'</div>';
 
   const acoes=[];
   acoes.push({txt:'Gerar PDF',cls:'btn-outline',fn:()=>gerarDeclaracao(id)});
@@ -1771,10 +2002,48 @@ function verRegistro(id){
   }else{
     acoes.push({txt:'Reabrir',cls:'btn-outline',fn:()=>reabrir(id)});
   }
-  acoes.push({txt:'Apagar',cls:'btn-red',fn:()=>excluir(id)});
+  if(souGestor()) acoes.push({txt:'Apagar',cls:'btn-red',fn:()=>excluir(id)});
   acoes.push({txt:'Fechar',cls:'btn-dark',fn:fecharModal});
 
   abrirModalCustom('Registro '+r.numero,html,acoes);
+
+  // A trilha mora no servidor; busca só quando o registro é aberto.
+  if(!Array.isArray(r.auditoria) && !r.provisorio){
+    PORTARIA.carregarAuditoria(id).then(lista=>{
+      r.auditoria=lista; dbSalvar();
+      const alvo=document.getElementById('trilha');
+      if(alvo && MODAL_ID===id) alvo.innerHTML=htmlTrilha(lista);
+    });
+  }
+}
+
+function htmlTrilha(lista){
+  if(!Array.isArray(lista)) return '<div style="font-size:12.5px;color:var(--muted)">Buscando histórico…</div>';
+  if(!lista.length)         return '<div style="font-size:12.5px;color:var(--muted)">Sem eventos registrados.</div>';
+  return '<ul class="audit">'+lista.map(a=>
+    '<li><span class="ts">'+fmtDT(a.ts)+'</span> — <b>'+esc(a.evento)+'</b>'+
+    (a.detalhe?'<br>'+esc(a.detalhe):'')+
+    '<br><span style="font-size:11.5px">por '+esc(a.autor)+(a.matricula?' (mat. '+esc(a.matricula)+')':'')+'</span></li>'
+  ).join('')+'</ul>';
+}
+
+/* Documento completo: só gestor, e a consulta fica gravada na auditoria
+   pelo próprio servidor (função revelar_documento). */
+async function verDocumento(id){
+  const r=DB.registros.find(x=>x.id===id); if(!r) return;
+  if(!confirm('Ver o documento completo de '+r.pessoa+'?\n\n'+
+              'Esta consulta fica registrada no histórico com o seu nome.')) return;
+  try{
+    const doc=await PORTARIA.revelarDocumento(id);
+    const el=document.getElementById('docVal');
+    if(el){ el.textContent=doc||'não informado'; el.style.color='var(--red)'; }
+    r.auditoria=null;                       // força recarregar a trilha com o novo evento
+    PORTARIA.carregarAuditoria(id).then(l=>{
+      r.auditoria=l;
+      const alvo=document.getElementById('trilha');
+      if(alvo && MODAL_ID===id) alvo.innerHTML=htmlTrilha(l);
+    });
+  }catch(e){ showToast(e.message||'Consulta não autorizada.','error'); }
 }
 
 function blocoConfirm(qual,c){
@@ -1822,6 +2091,9 @@ function carregarLogo(){
 function gerarDeclaracao(id){
   const r=DB.registros.find(x=>x.id===id); if(!r) return;
   if(!window.jspdf||!window.jspdf.jsPDF){ showToast('Não consegui gerar o PDF (sem internet para carregar a ferramenta).','error'); return; }
+  if(r.provisorio && !confirm('Este registro ainda não subiu para o servidor e o número '+r.numero+
+                              ' é provisório.\n\nAo sincronizar ele vai receber o número definitivo, '+
+                              'e este PDF ficará desatualizado.\n\nGerar mesmo assim?')) return;
 
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
@@ -1872,7 +2144,7 @@ function gerarDeclaracao(id){
 
   tabela('QUEM ENTROU E COM QUAL VEÍCULO',[
     ['Nome',      r.pessoa],
-    ['Documento', r.documento],
+    ['Documento', r.documentoMascarado],
     ['Empresa',   r.empresa],
     ['Placa',     placaBonita(r.placa)],
     ['Veículo',   r.veiculo]
@@ -1962,7 +2234,7 @@ function exportarCSV(){
              'Setor que autorizou','Autorizado por','Matricula entrada','Porteiro entrada','Turno entrada',
              'Matricula saida','Porteiro saida','Turno saida','Situacao','Anotacoes','Selo','Conferencia'];
   const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""').replace(/\r?\n/g,' ')+'"';
-  const linhas=lista.map(r=>[r.numero,r.pessoa,r.documento,r.empresa,placaBonita(r.placa),r.veiculo,
+  const linhas=lista.map(r=>[r.numero,r.pessoa,r.documentoMascarado,r.empresa,placaBonita(r.placa),r.veiculo,
     fmtDT(r.entrada), r.saida?fmtDT(r.saida):'', duracao(permanenciaMs(r)),
     r.setor,r.autorizador,r.matriculaEntrada||'',r.porteiroEntrada,r.turnoEntrada,
     r.matriculaSaida||'',r.porteiroSaida||'',r.turnoSaida||'',
@@ -1974,47 +2246,34 @@ function exportarCSV(){
   showToast(lista.length+' registro(s) exportados.','success');
 }
 
-function exportarBackup(){
-  baixarArquivo('Portaria-Backup-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.json',
-                JSON.stringify(DB,null,2),'application/json');
-  showToast('Cópia de segurança salva na pasta de downloads.','success');
+/* Puxa tudo do servidor sob demanda (botão "Atualizar agora"). */
+async function recarregarDoServidor(){
+  const pacote=await PORTARIA.puxarTudo();
+  if(pacote){ aplicarDoServidor(pacote); renderTurno(); renderTudo(); }
+  return !!pacote;
+}
+async function forcarSincronizacao(){
+  showToast('Atualizando…');
+  await PORTARIA.descarregar();
+  const ok=await recarregarDoServidor();
+  showToast(ok?'Dados atualizados.':'Sem conexão com o servidor agora.', ok?'success':'error');
 }
 
-function importarBackup(input){
-  const f=input.files&&input.files[0];
-  input.value='';
-  if(!f) return;
-  const fr=new FileReader();
-  fr.onload=()=>{
-    let o;
-    try{ o=JSON.parse(fr.result); }
-    catch(e){ showToast('Arquivo inválido.','error'); return; }
-    if(!o||!Array.isArray(o.registros)){ showToast('Este arquivo não é uma cópia da portaria.','error'); return; }
-
-    // Mescla por número do registro: o que já existe é preservado.
-    const existentes=new Set(DB.registros.map(r=>r.numero));
-    const novos=o.registros.filter(r=>r&&r.numero&&!existentes.has(r.numero));
-    if(!confirm('A cópia tem '+o.registros.length+' registro(s).\n'+
-                novos.length+' serão acrescentados; '+(o.registros.length-novos.length)+
-                ' já existem e serão ignorados.\n\nContinuar?')) return;
-
-    // Traz junto as assinaturas e os porteiros que ainda não existem aqui.
-    Object.assign(DB.assinaturas, o.assinaturas||{});
-    const jaTem=new Set(DB.porteiros.map(p=>p.matricula));
-    (o.porteiros||[]).forEach(p=>{ if(p&&p.matricula&&!jaTem.has(String(p.matricula))) DB.porteiros.push(p); });
-    novos.forEach(r=>{
-      r.id=r.id||uid();
-      r.auditoria=r.auditoria||[];
-      DB.registros.push(r);
-      const m=/^.+-(\d{4})-(\d+)$/.exec(r.numero);
-      if(m) consumirNumero(m[1],parseInt(m[2],10));
-    });
-    if(!dbSalvar()) return;
-    renderTudo();
-    showToast(novos.length+' registro(s) restaurados.','success');
-  };
-  fr.onerror=()=>showToast('Não consegui ler o arquivo.','error');
-  fr.readAsText(f);
+/* Descarte LGPD: apaga o documento dos visitantes de registros antigos,
+   preservando o resto do histórico. Ação de gestor, registrada em auditoria. */
+async function descartarAntigos(){
+  if(!souGestor()){ showToast('Somente gestores executam o descarte.','error'); return; }
+  const resp=prompt('Apagar o documento (RG/CPF) dos visitantes em registros com mais de quantos MESES?\n\n'+
+                    'O restante do registro é preservado. Não dá para desfazer.','24');
+  if(resp===null) return;
+  const meses=parseInt(resp,10);
+  if(!meses || meses<1){ showToast('Informe um número de meses válido.','error'); return; }
+  if(!confirm('Confirma apagar os documentos de registros com mais de '+meses+' meses?')) return;
+  try{
+    const qtd=await PORTARIA.anonimizarAntigos(meses);
+    await recarregarDoServidor();
+    showToast(qtd+' registro(s) tiveram o documento apagado.','success');
+  }catch(e){ showToast(e.message||'Não consegui executar o descarte.','error'); }
 }
 
 /* ================================================================
@@ -2026,7 +2285,60 @@ function relogio(){
     p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYear()+'  '+p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());
 }
 
-window.addEventListener('DOMContentLoaded',()=>{
+/* ---- Login ---- */
+function mostrarGate(msg,tipo){
+  const g=document.getElementById('gate');
+  g.hidden=false;
+  const m=document.getElementById('gateMsg');
+  if(msg){ m.textContent=msg; m.className='gate-msg on'+(tipo==='info'?' info':''); }
+  else   { m.className='gate-msg'; }
+  setTimeout(()=>{ const el=document.getElementById('gMat'); if(el) el.focus(); },80);
+}
+function esconderGate(){ document.getElementById('gate').hidden=true; }
+
+async function fazerLogin(){
+  const mat=document.getElementById('gMat').value.trim();
+  const senha=document.getElementById('gSenha').value;
+  const btn=document.getElementById('gBtn');
+  btn.disabled=true; btn.textContent='ENTRANDO…';
+  try{
+    EU=await PORTARIA.entrar(mat,senha);
+    document.getElementById('gSenha').value='';
+    esconderGate();
+    await depoisDoLogin();
+  }catch(e){
+    mostrarGate(e.message||'Não foi possível entrar.');
+  }finally{
+    btn.disabled=false; btn.textContent='ENTRAR';
+  }
+}
+
+async function fazerLogout(){
+  if(!await PORTARIA.sair()) return;
+  EU=null; DB.turno=null;
+  // A cópia local sai junto: em aparelho compartilhado, quem sai não deixa
+  // dados de visitante acessíveis para o próximo.
+  try{ localStorage.removeItem(CONFIG.DB_KEY); }catch(e){}
+  DB=dbVazio();
+  PORTARIA.desligarSondagem();
+  location.reload();
+}
+
+/* Roda uma vez, depois que a identidade está confirmada. */
+async function depoisDoLogin(){
+  renderUsuario();
+  renderTurno();
+  renderTudo();                       // mostra a cópia local na hora
+  const pacote=await PORTARIA.puxarTudo();
+  if(pacote){ aplicarDoServidor(pacote); }
+  else showToast('Sem conexão. Mostrando a última cópia deste aparelho.','error');
+  renderTurno(); renderTudo();
+  await PORTARIA.descarregar();
+
+  PORTARIA.ligarSondagem(pacote=>{ aplicarDoServidor(pacote); renderTurno(); renderTudo(); });
+}
+
+window.addEventListener('DOMContentLoaded',async ()=>{
   DB=dbCarregar();
 
   document.getElementById('hdrDoc').textContent=CONFIG.DOC_REF;
@@ -2037,37 +2349,43 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   carregarLogo();
   preencherSelects();
-  renderTurno();
   restaurarRascunho();
   if(!document.getElementById('fEntrada').value) agoraNoCampo('fEntrada');
-  renderTudo();
 
   CAMPOS_FORM.forEach(id=>document.getElementById(id).addEventListener('input',salvarRascunho));
+  PORTARIA.aoMudar(info=>{ renderSync(info); });
 
   relogio(); setInterval(relogio,1000);
   // Mantém o semáforo de permanência atualizado sem recarregar a página.
   setInterval(()=>{ renderContadores(); renderAbertos(); renderHistorico(); },60000);
 
-  // Outra aba do mesmo navegador gravou: recarrega para não trabalhar em cima de dados velhos.
-  window.addEventListener('storage',ev=>{
-    if(ev.key!==CONFIG.DB_KEY) return;
-    DB=dbCarregar(); renderTurno(); renderTudo();
-    showToast('Dados atualizados por outra aba.');
-  });
-
   document.addEventListener('keydown',ev=>{
     if(ev.key==='Escape' && !document.getElementById('modal').hidden) fecharModal();
   });
 
-  const violados=DB.registros.filter(r=>!integro(r)).length;
-  if(violados) showToast(violados+' registro(s) foram alterados por fora do sistema. Confira o histórico.','error');
+  // Conexão e sessão
+  let ini;
+  try{ ini=await PORTARIA.iniciar(); }
+  catch(e){
+    mostrarGate('Não consegui falar com o servidor. Verifique o config.js e a internet.');
+    return;
+  }
+  if(!ini.configurado){
+    mostrarGate('A conexão com o banco ainda não foi configurada. Avise a Engenharia (arquivo config.js).');
+    return;
+  }
+  if(ini.sessao){
+    EU=ini.sessao;
+    esconderGate();
+    await depoisDoLogin();
+  }else{
+    mostrarGate();
+  }
 });
 
-// Avisa antes de fechar com turno aberto e carros ainda dentro.
+// Avisa antes de fechar se ainda há coisa esperando envio.
 window.addEventListener('beforeunload',ev=>{
-  if(DB && DB.turno && DB.registros.some(r=>r.status==='aberto')){
-    ev.preventDefault(); ev.returnValue='';
-  }
+  if(PORTARIA.pendentes>0){ ev.preventDefault(); ev.returnValue=''; }
 });
 </script>
 </body>

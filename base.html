@@ -1,0 +1,1994 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Supplier Self-Assessment — Perpec Oilfield Supply</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+<!-- Dicionário de idiomas (compartilhado com auditoria.html).
+     Para adicionar/editar um idioma, veja o cabeçalho de i18n.js. -->
+<script src="i18n.js"></script>
+
+<!-- ============================================================= -->
+<!-- ===== CONFIG (ponto único de manutenção) ===================== -->
+<!-- ============================================================= -->
+<script>
+  const CONFIG = {
+    // Webhook do Make — recebe um ÚNICO POST multipart com os dados (JSON)
+    // e os 3 arquivos (Cartão CNPJ, Certificado SGQ, Relatório PDF) em binário.
+    WEBHOOK_URL: "https://hook.us2.make.com/s0auqaxfdcxd4udgehn8gnceqk7r6z7w",
+
+    // ---- Limite de payload do POST único (dados + 3 arquivos) ----
+    MAX_PAYLOAD_MB: 2,
+
+    // ---- Compressão de imagens (reduz o tamanho dos anexos) ----
+    MAX_FILE_MB: 15,    // alerta se um único arquivo passar disso (após compressão).
+    IMG_MAX_PX:  1800,  // redimensiona imagens grandes (maior lado) antes de anexar.
+    IMG_QUALITY: 0.72,  // qualidade JPEG da recompressão de imagens.
+
+    // ---- Fonte de dados: Planilha Google (atualiza em tempo real) ----
+    // As perguntas e escopos são lidos diretamente das abas da planilha
+    // abaixo via export CSV (endpoint gviz). Editar a planilha (adicionar,
+    // remover, reescrever) reflete no portal automaticamente, SEM commit.
+    // Requisito: a planilha deve estar compartilhada como "Qualquer pessoa
+    // com o link → Leitor".
+    //   Aba de perguntas: colunas bloco_id, categoria, grupo, bloco_nota, escopo, codigo, texto
+    //   Aba de escopos:   colunas nome, tipo, blocos
+    //
+    // ---- Tradução (portal global) ----
+    // As colunas são identificadas pelo NOME no cabeçalho, não pela posição:
+    // acrescente as colunas de idioma onde quiser, o portal encontra sozinho.
+    //   Perguntas: categoria_en, texto_en, categoria_es, texto_es, … (um par por idioma)
+    //   Escopo:    nome_en, nome_es, …
+    //   Textos:    conteudo_en, conteudo_es, …
+    // Coluna vazia ou ausente cai no inglês; sem inglês, cai no português.
+    // IMPORTANTE: a coluna "nome" do escopo é a CHAVE que liga o link do
+    // comprador (?escopos=) aos blocos de perguntas. Traduza em nome_XX,
+    // nunca altere "nome" — mudar essa coluna invalida os links já enviados.
+    SHEET_ID:            "1soNX-LdvAit09ja38D3eEFXTEk82oyt_XrhlzJMl05c",
+    SHEET_PERGUNTAS_ABA: "Perguntas",  // nome da aba de perguntas
+    SHEET_ESCOPOS_ABA:   "Escopo",     // nome da aba de escopos
+    SHEET_TEXTOS_ABA:    "Textos",     // aba dos textos de orientação (chave|conteudo)
+
+    // Fontes CSV locais (fallback se a planilha estiver indisponível).
+    PERGUNTAS_CSV_URL: "perguntas.csv",
+    ESCOPOS_CSV_URL:   "escopo.csv",
+    LOGO_URL:          "PERPEC - LOGO PRINCIPAL.png",
+    // Referência do documento exibida no cabeçalho / rodapé do PDF
+    DOC_REF: "FP-SGQ-0022 RevForm.00"
+  };
+
+  // ---- Parâmetros de pontuação (facilmente revisáveis) ----------
+  const SCORING = {
+    CONFORME: 100,   // Conforme COM evidência
+    REGULAR:  75,    // Regular (ou Conforme SEM evidência)
+    NC:       0,     // Não Conforme
+    PESO_SGQ:     0.5,   // peso do bloco SGQ na nota final
+    PESO_TECNICA: 0.5,   // peso do bloco técnico na nota final
+    PISO_CERT_SGQ: 80     // nota final mínima garantida quando há certificado de SGQ válido com evidência anexada (Aprovado sem ressalvas)
+  };
+
+  // ---- Faixas de classificação (cor + rótulo) -------------------
+  // "label" é o rótulo em português que vai no payload do Make/Monday —
+  // NÃO traduza aqui. "key" é a chave usada para exibir o rótulo traduzido
+  // na tela e nos PDFs (ver i18n.js).
+  const FAIXAS = [
+    { min: 0,  max: 59.999, key:"cls.reprovado", label: "Não Aprovado",            cor: "#C0392B", rgb: [192, 57, 43],  bg: "#FDECEA" },
+    { min: 60, max: 79.999, key:"cls.ressalvas", label: "Aprovado com Ressalvas",  cor: "#B7791F", rgb: [183, 121, 31], bg: "#FEF7E6" },
+    { min: 80, max: 100,    key:"cls.aprovado",  label: "Aprovado",                cor: "#2E7D32", rgb: [46, 125, 50],  bg: "#EAF6EB" }
+  ];
+
+  // Formatos aceitos para upload do certificado SGQ e do cartão CNPJ
+  const ACCEPT_CERT = ".pdf,.jpg,.jpeg,.png";
+  const ACCEPT_CNPJ = ".pdf,.jpg,.jpeg,.png";
+
+  // País cujos campos usam as regras brasileiras (máscara de CNPJ, UF de 2
+  // letras, telefone (00) 00000-0000). Qualquer outro país usa campos livres.
+  const PAIS_LOCAL = "BR";
+</script>
+
+<style>
+/* ====== SISTEMA DE DESIGN (idêntico ao formulário existente) ====== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --red:#C0392B;--red2:#961c13;--dark:#1A1210;
+  --bg:#F2F1ED;--surface:#FFFFFF;--surface2:#F8F7F5;
+  --border:#E0DBD5;--border2:#C5BDB5;
+  --text:#18171A;--muted:#6A6760;
+  --accent:#C0392B;--accent-lt:#FDF0EF;
+  --radius:8px;--radius-lg:12px;
+  --green:#2E7D32;--green-bg:#EAF6EB;--green-bd:#A7D7AA;
+  --yellow:#B7791F;--yellow-bg:#FEF7E6;--yellow-bd:#F0D98A;
+  --blue:#3D5AC0;--blue-bg:#EEF2FF;--blue-bd:#B9C5EC;
+}
+body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+.site-header{background:#fff;border-bottom:3px solid var(--red);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.header-inner{max-width:900px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:.7rem 1.5rem}
+.header-logo img{height:44px;width:auto;display:block}
+.header-right{text-align:right}
+.header-right .title{font-size:15px;font-weight:700;color:var(--dark)}
+.header-right .sub{font-size:11px;color:var(--muted);margin-top:2px}
+.doc-strip{background:var(--dark);padding:.55rem 1.5rem}
+.doc-strip-inner{max-width:900px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.4rem}
+.doc-code-label{font-size:11px;color:#A09090;letter-spacing:.05em;text-transform:uppercase;margin-right:4px}
+.doc-code-prefix{font-size:12px;font-weight:700;color:#fff;letter-spacing:.08em;margin-right:2px}
+.doc-code-val{font-family:"Courier New",monospace;font-size:14px;font-weight:700;color:#fff;letter-spacing:.1em}
+.doc-meta{font-size:11px;color:#B0A0A0}
+.doc-req{font-size:11px;color:#E09090}
+.sticky-top{position:sticky;top:0;z-index:100}
+.wrap{max-width:900px;margin:0 auto;padding:1.8rem 1rem 5rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:1.1rem;box-shadow:0 1px 3px rgba(0,0,0,.05);position:relative}
+.card-head{background:var(--dark);padding:.65rem 1.3rem;display:flex;align-items:center;gap:8px;border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+.card-head h2{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#D4C8C4}
+.card-head svg{width:13px;height:13px;stroke:#C0392B;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.card-body{padding:1.25rem 1.3rem}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:13px}
+.full{grid-column:1/-1}
+@media(max-width:600px){.g2,.g3{grid-template-columns:1fr}.full{grid-column:1}}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:11.5px;font-weight:600;color:var(--muted);letter-spacing:.02em}
+.req{color:var(--red);margin-left:1px}
+.field input,.field textarea,.field select{border:1px solid var(--border2);border-radius:var(--radius);padding:9px 11px;font-size:14px;font-family:inherit;color:var(--text);background:var(--surface);transition:border-color .14s,box-shadow .14s;width:100%}
+.field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--red);box-shadow:0 0 0 3px rgba(192,57,43,.12)}
+.field input[readonly]{background:var(--surface2);color:var(--muted);cursor:default;border-style:dashed}
+.field textarea{resize:vertical;min-height:72px}
+.divider{height:1px;background:var(--border);margin:16px 0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 16px;border:none;border-radius:var(--radius);font-size:13px;font-weight:600;cursor:pointer;transition:all .13s;font-family:inherit;white-space:nowrap}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.btn:active{transform:translateY(0)}
+.btn-dark{background:var(--dark);color:#fff}.btn-dark:hover{background:#2D1F1A}
+.btn-red{background:var(--red);color:#fff}.btn-red:hover{background:var(--red2)}
+.btn-outline{background:transparent;color:var(--text);border:1px solid var(--border2)}
+.btn-outline:hover{background:var(--surface2);border-color:#9A9087}
+.btn:disabled{background:var(--border2) !important;cursor:not-allowed;color:var(--muted);transform:none !important;box-shadow:none !important}
+.act-bar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.1rem 1.3rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.act-group{display:flex;gap:8px;flex-wrap:wrap}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--dark);color:#fff;border-radius:var(--radius-lg);padding:12px 20px;font-size:13.5px;font-weight:600;pointer-events:none;opacity:0;transition:opacity .2s,transform .2s;z-index:99999;max-width:90vw;text-align:center;white-space:pre-line}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.success{background:#155724}.toast.error{background:var(--red)}
+.count-pill{display:inline-flex;align-items:center;background:rgba(192,57,43,.15);color:#E08070;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;letter-spacing:.04em;margin-left:auto}
+.page-footer{text-align:center;font-size:12px;color:#aaa;margin-top:32px;padding-bottom:24px}
+@media(max-width:768px){.act-bar{flex-direction:column;align-items:stretch}.act-group{justify-content:stretch}.act-bar .btn{width:100%}}
+@media(max-width:480px){.header-logo img{height:36px}.card-body{padding:1rem}}
+
+/* ====== COMPONENTES NOVOS (mesma linguagem visual) ====== */
+
+/* Aviso LGPD */
+.lgpd-note{font-size:13px;color:var(--text);line-height:1.6}
+.lgpd-note ul{margin:8px 0 0 18px;color:var(--muted)}
+.lgpd-note li{margin-bottom:5px}
+.lgpd-accept{display:flex;align-items:flex-start;gap:10px;margin-top:16px;padding:12px 14px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--surface2);cursor:pointer;transition:border-color .14s,background .14s}
+.lgpd-accept:hover{border-color:#9A9087}
+.lgpd-accept.ok{border-color:var(--green);background:var(--green-bg)}
+.lgpd-accept input{width:18px;height:18px;margin-top:1px;accent-color:var(--red);flex-shrink:0;cursor:pointer}
+.lgpd-accept span{font-size:13px;font-weight:600;color:var(--text)}
+
+/* Trava do conteúdo até aceite */
+#conteudo.locked{opacity:.4;pointer-events:none;filter:grayscale(.35);user-select:none}
+.lock-hint{display:none;text-align:center;font-size:12.5px;color:var(--muted);font-style:italic;margin:-.4rem 0 1rem}
+#conteudo.locked ~ .lock-hint{display:block}
+
+/* Upload de arquivo (chip) */
+.file-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.file-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 13px;border:1.5px dashed var(--border2);background:var(--surface2);border-radius:var(--radius);font-size:12.5px;font-weight:600;color:var(--red);cursor:pointer;transition:border-color .13s,background .13s;font-family:inherit}
+.file-btn:hover{border-color:var(--red);background:var(--accent-lt)}
+.file-btn svg{width:14px;height:14px;stroke:var(--red);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.file-name{font-size:12px;color:var(--text);background:#fff;border:1px solid var(--border);border-radius:6px;padding:5px 10px;display:inline-flex;align-items:center;gap:8px;max-width:100%}
+.file-name.empty{color:var(--muted);font-style:italic;background:transparent;border:none;padding:5px 0}
+.file-name .x{cursor:pointer;color:var(--muted);font-weight:700;line-height:1;font-size:15px}
+.file-name .x:hover{color:var(--red)}
+.file-name .ok-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
+
+/* Pills sim/não e escopos */
+.opt-group{display:flex;gap:8px;flex-wrap:wrap;padding-top:2px}
+.opt-radio{display:none}
+.opt-label{padding:7px 18px;border-radius:20px;font-size:13px;font-weight:600;border:1px solid var(--border2);cursor:pointer;background:var(--surface);color:var(--muted);transition:all .13s;user-select:none}
+.opt-sim:checked + .opt-label{background:var(--green);border-color:var(--green);color:#fff}
+.opt-nao:checked + .opt-label{background:var(--dark);border-color:var(--dark);color:#fff}
+
+.escopo-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+@media(max-width:600px){.escopo-grid{grid-template-columns:1fr}}
+.escopo-chip{display:flex;align-items:center;gap:9px;padding:10px 13px;border:1px solid var(--border2);border-radius:var(--radius);cursor:pointer;background:var(--surface);transition:border-color .13s,background .13s;font-size:13px}
+.escopo-chip:hover{border-color:#9A9087;background:var(--surface2)}
+.escopo-chip input{width:17px;height:17px;accent-color:var(--red);cursor:pointer;flex-shrink:0}
+.escopo-chip.sel{border-color:var(--red);background:var(--accent-lt)}
+.escopo-chip.bloqueado{pointer-events:none}
+.escopo-chip.bloqueado input{cursor:default}
+.escopo-chip .esc-name{font-weight:600;color:var(--text)}
+.escopo-chip .esc-tag{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:20px;margin-left:auto}
+.esc-tag.produto{background:#EEF2FF;color:#3D5AC0}
+.esc-tag.servico{background:#F1ECE6;color:#8A6D3B}
+
+/* Bloco de pergunta */
+.q-block{border:1px solid var(--border);border-radius:var(--radius);padding:13px 14px;margin-bottom:12px;background:var(--surface);transition:border-color .14s}
+.q-block.done{border-left:4px solid var(--green)}
+.q-block.nc{border-left:4px solid var(--red)}
+.q-block.reg{border-left:4px solid var(--yellow)}
+.q-block.na{border-left:4px solid var(--blue)}
+.q-top{display:flex;align-items:flex-start;gap:10px;margin-bottom:11px}
+.q-code{font-family:"Courier New",monospace;font-size:12px;font-weight:700;color:#fff;background:var(--dark);border-radius:6px;padding:3px 8px;flex-shrink:0}
+.q-text{flex:1;font-size:13.5px;line-height:1.45;color:var(--text);font-weight:500}
+.q-score{flex-shrink:0;min-width:54px;text-align:center;font-size:13px;font-weight:800;border-radius:20px;padding:4px 10px;background:var(--surface2);color:var(--muted)}
+.q-score.c{background:var(--green-bg);color:var(--green)}
+.q-score.r{background:var(--yellow-bg);color:var(--yellow)}
+.q-score.n{background:var(--accent-lt);color:var(--red)}
+.q-score.na{background:var(--blue-bg);color:var(--blue)}
+.status-pills{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+.st-radio{display:none}
+.st-label{padding:6px 14px;border-radius:20px;font-size:12.5px;font-weight:600;border:1px solid var(--border2);cursor:pointer;background:var(--surface);color:var(--muted);transition:all .13s;user-select:none}
+.st-conf:checked + .st-label{background:var(--green);border-color:var(--green);color:#fff}
+.st-reg:checked + .st-label{background:var(--yellow);border-color:var(--yellow);color:#fff}
+.st-nc:checked + .st-label{background:var(--red);border-color:var(--red);color:#fff}
+.st-na:checked + .st-label{background:var(--blue);border-color:var(--blue);color:#fff}
+.q-com textarea{width:100%;border:1px solid var(--border2);border-radius:var(--radius);padding:8px 10px;font-size:13px;font-family:inherit;min-height:46px;resize:vertical;color:var(--text)}
+.q-com textarea:focus{outline:none;border-color:var(--red);box-shadow:0 0 0 3px rgba(192,57,43,.12)}
+.q-warn{display:none;margin-top:8px;font-size:11.5px;font-weight:600;color:var(--yellow);background:var(--yellow-bg);border:1px solid var(--yellow-bd);border-radius:6px;padding:6px 9px}
+.q-warn.show{display:block}
+.q-warn.err{color:var(--red);background:var(--accent-lt);border-color:#E8B8B0}
+.q-warn.ok{color:var(--green);background:var(--green-bg);border-color:var(--green-bd)}
+.bloco-sub{font-size:11px;color:var(--muted);margin:-.5rem 0 .9rem;font-weight:500}
+.bloco-tag{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:20px;margin-left:auto;flex-shrink:0}
+.bloco-tag.sgq{background:rgba(192,57,43,.2);color:#E08070}
+.bloco-tag.tec{background:rgba(99,130,207,.25);color:#9DB0E8}
+
+/* Indicador em tempo real — faixa fixa */
+.rt-strip{background:var(--surface);border-bottom:1px solid var(--border);box-shadow:0 2px 6px rgba(0,0,0,.06);display:none}
+.rt-strip.on{display:block}
+.rt-inner{max-width:900px;margin:0 auto;display:flex;align-items:center;gap:14px;padding:.5rem 1.5rem}
+.rt-track{flex:1;height:9px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;overflow:hidden;min-width:80px}
+.rt-fill{height:100%;width:0%;border-radius:20px;transition:width .3s ease,background .3s}
+.rt-num{font-size:14px;font-weight:800;color:var(--text);min-width:46px;text-align:right}
+.rt-cls{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap}
+.rt-prog{font-size:11px;color:var(--muted);white-space:nowrap}
+@media(max-width:600px){.rt-inner{padding:.5rem 1rem;gap:9px}.rt-prog{display:none}}
+
+/* Card de resultado consolidado */
+.result-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:13px;margin-bottom:14px}
+@media(max-width:600px){.result-grid{grid-template-columns:1fr}}
+.result-tile{border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center;background:var(--surface2)}
+.result-tile .rt-label{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.result-tile .rt-val{font-size:30px;font-weight:800;color:var(--text);margin-top:4px;line-height:1}
+.result-tile.final{background:var(--dark);border-color:var(--dark)}
+.result-tile.final .rt-label{color:#A09090}
+.result-tile.final .rt-val{color:#fff}
+.result-class{display:flex;align-items:center;justify-content:center;gap:10px;font-size:14px;font-weight:800;border-radius:var(--radius);padding:12px;border:1px solid var(--border)}
+.result-class .dot{width:11px;height:11px;border-radius:50%}
+.empty-state{text-align:center;padding:2rem 1rem;color:var(--muted);font-size:13px;border:1.5px dashed var(--border2);border-radius:var(--radius-lg)}
+
+/* ====== SELETOR DE IDIOMA ====== */
+
+/* O cabeçalho passa a ter 3 blocos: logo | título | idioma.
+   O título é empurrado para a direita para ficar junto do seletor. */
+.header-inner{gap:12px}
+.header-right{margin-left:auto}
+@media(max-width:480px){.header-right .sub{display:none}}
+
+/* Botão no cabeçalho — sempre visível, permite trocar depois de iniciar */
+.lang-wrap{position:relative;flex-shrink:0}
+.lang-btn{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border:1px solid var(--border2);border-radius:20px;
+  background:var(--surface);cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;color:var(--text);transition:border-color .13s,background .13s}
+.lang-btn:hover{border-color:var(--red);background:var(--accent-lt)}
+.lang-btn .flag{font-size:17px;line-height:1}
+.lang-btn .caret{font-size:9px;color:var(--muted)}
+@media(max-width:600px){.lang-btn .name{display:none}}
+.lang-menu{display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:400;background:var(--surface);
+  border:1px solid var(--border2);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.16);padding:5px;min-width:186px}
+.lang-menu.open{display:block}
+.lang-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 11px;border:none;background:none;border-radius:6px;
+  cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:600;color:var(--text);text-align:left;transition:background .1s}
+.lang-item:hover{background:var(--surface2)}
+.lang-item.sel{background:var(--accent-lt);color:var(--red)}
+.lang-item .flag{font-size:19px;line-height:1}
+
+/* Tela de escolha inicial — cobre a página até o idioma ser escolhido */
+.lang-gate{position:fixed;inset:0;z-index:9999;background:rgba(26,18,16,.72);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;padding:1.2rem;overflow-y:auto}
+.lang-gate[hidden]{display:none}
+.lang-card{background:var(--surface);border-radius:var(--radius-lg);max-width:520px;width:100%;
+  box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden;margin:auto}
+.lang-card .top{background:#fff;padding:1.3rem 1.5rem;text-align:center}
+.lang-card .top img{height:38px;width:auto;margin-bottom:12px}
+.lang-card .top h1{font-size:17px;font-weight:700;color:var(--dark);letter-spacing:.01em}
+.lang-card .top p{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
+.lang-card .grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:1.2rem}
+@media(max-width:420px){.lang-card .grid{grid-template-columns:1fr}}
+.lang-opt{display:flex;align-items:center;gap:11px;padding:12px 14px;border:1px solid var(--border2);border-radius:var(--radius);
+  background:var(--surface);cursor:pointer;font-family:inherit;font-size:14.5px;font-weight:600;color:var(--text);
+  text-align:left;transition:border-color .13s,background .13s,transform .13s}
+.lang-opt:hover{border-color:var(--red);background:var(--accent-lt);transform:translateY(-1px)}
+.lang-opt .flag{font-size:23px;line-height:1;flex-shrink:0}
+.lang-opt-default{border-color:var(--red);background:var(--accent-lt)}
+</style>
+</head>
+<body>
+
+<!-- ===== ESCOLHA DE IDIOMA (aparece antes de tudo, sempre) =====
+     Preenchido por renderLangGate(). Só fica oculto se o idioma já
+     veio pronto no link enviado pelo comprador (?lang=xx).           -->
+<div class="lang-gate" id="langGate" hidden>
+  <div class="lang-card">
+    <div class="top">
+      <img src="PERPEC - LOGO PRINCIPAL.png" alt="Perpec Oilfield Supply" onerror="this.style.display='none'"/>
+      <h1 id="langGateTitle">Choose your language</h1>
+      <p id="langGateSub"></p>
+    </div>
+    <div class="grid" id="langGateGrid"></div>
+  </div>
+</div>
+
+<div class="sticky-top">
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-logo">
+        <img src="PERPEC - LOGO PRINCIPAL.png" alt="Perpec Oilfield Supply" onerror="this.style.display='none'"/>
+      </div>
+      <div class="header-right">
+        <div class="title" data-i18n="hdr.title">Supplier Self-Assessment</div>
+        <div class="sub" data-i18n="hdr.sub">Qualification and approval portal</div>
+      </div>
+      <!-- Troca de idioma a qualquer momento -->
+      <div class="lang-wrap">
+        <button class="lang-btn" id="langBtn" type="button" onclick="toggleLangMenu(event)" aria-haspopup="true" aria-expanded="false">
+          <span class="flag" id="langBtnFlag">🇺🇸</span>
+          <span class="name" id="langBtnName">English</span>
+          <span class="caret">▼</span>
+        </button>
+        <div class="lang-menu" id="langMenu"></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="doc-strip">
+    <div class="doc-strip-inner">
+      <div>
+        <span class="doc-code-label" data-i18n="hdr.trace">Traceability</span>
+        <span class="doc-code-val" id="hdrRastreabilidade">—</span>
+      </div>
+      <span class="doc-meta" id="docRef">—</span>
+      <span class="doc-req" data-i18n="hdr.required">* Required fields</span>
+    </div>
+  </div>
+
+  <!-- Indicador em tempo real -->
+  <div class="rt-strip" id="rtStrip">
+    <div class="rt-inner">
+      <span class="rt-prog" id="rtProg">—</span>
+      <div class="rt-track"><div class="rt-fill" id="rtFill"></div></div>
+      <span class="rt-num" id="rtNum">—</span>
+      <span class="rt-cls" id="rtCls" style="background:var(--surface2);color:var(--muted)">—</span>
+    </div>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <!-- ===== COMO RESPONDER ===== -->
+  <div class="card">
+    <div class="card-head">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="8.01"/></svg>
+      <h2 data-i18n="card.how">How to Complete This Questionnaire</h2>
+    </div>
+    <div class="card-body">
+      <!-- Conteúdo vem de i18n.js (txt.how) e pode ser sobrescrito pela
+           aba "Textos" da planilha, na coluna do idioma corrente. -->
+      <div class="lgpd-note" id="txtComoResponder" data-i18n-html="txt.how"></div>
+    </div>
+  </div>
+
+  <!-- ===== PASTA DE EVIDÊNCIAS ===== -->
+  <div class="card">
+    <div class="card-head">
+      <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+      <h2 data-i18n="card.evid">Evidence Folder</h2>
+    </div>
+    <div class="card-body">
+      <div class="lgpd-note" id="txtEvidencias" data-i18n-html="txt.evid"></div>
+      <div id="pastaEvidWrap" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <!-- ===== AVISO LGPD ===== -->
+  <div class="card">
+    <div class="card-head">
+      <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <h2 data-i18n="card.privacy">Privacy Notice (LGPD / GDPR)</h2>
+    </div>
+    <div class="card-body">
+      <div class="lgpd-note" id="txtLGPD" data-i18n-html="txt.privacy"></div>
+      <label class="lgpd-accept" id="lgpdBox">
+        <input type="checkbox" id="lgpdCheck" onchange="toggleLGPD()">
+        <span><span data-i18n="privacy.accept"></span> <span class="req">*</span></span>
+      </label>
+    </div>
+  </div>
+
+  <div id="conteudo" class="locked">
+
+    <!-- ===== IDENTIFICAÇÃO DO FORNECEDOR ===== -->
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-4"/><line x1="9" y1="9" x2="9" y2="9.01"/><line x1="9" y1="13" x2="9" y2="13.01"/></svg>
+        <h2 data-i18n="card.ident">Supplier Identification</h2>
+      </div>
+      <div class="card-body">
+        <div class="g2" style="margin-bottom:13px">
+          <div class="field"><label data-i18n="f.trace">Traceability</label><input type="text" id="rastreabilidadeField" readonly></div>
+          <div class="field"><label data-i18n="f.datetime">Date and Time of Completion</label><input type="text" id="dataHoraField" readonly></div>
+        </div>
+        <div class="g2" style="margin-bottom:13px">
+          <div class="field"><label><span data-i18n="f.legalName"></span> <span class="req">*</span></label><input type="text" id="razaoSocial" data-i18n-ph="f.legalName.ph"></div>
+          <div class="field"><label><span data-i18n="f.tradeName"></span> <span class="req">*</span></label><input type="text" id="nomeFantasia" data-i18n-ph="f.tradeName.ph"></div>
+        </div>
+
+        <!-- País define as regras dos campos abaixo: no Brasil vira CNPJ com
+             máscara, UF de 2 letras e telefone (00) 00000-0000; em qualquer
+             outro país os campos ficam livres (ver aplicarPais()). -->
+        <div class="g2" style="margin-bottom:13px">
+          <div class="field">
+            <label><span data-i18n="f.country"></span> <span class="req">*</span></label>
+            <select id="pais" onchange="aplicarPais()"></select>
+          </div>
+          <div class="field"><label><span id="lblTaxId"></span> <span class="req">*</span></label><input type="text" id="cnpj"></div>
+          <div class="field full"><label><span id="lblTaxDoc"></span> <span class="req">*</span></label><div id="cnpjUpload"></div></div>
+        </div>
+
+        <div class="g3" style="margin-bottom:13px">
+          <div class="field full"><label><span data-i18n="f.address"></span> <span class="req">*</span></label><input type="text" id="endereco" data-i18n-ph="f.address.ph"></div>
+        </div>
+        <div class="g2" style="margin-bottom:13px">
+          <div class="field"><label><span data-i18n="f.city"></span> <span class="req">*</span></label><input type="text" id="cidade" data-i18n-ph="f.city.ph"></div>
+          <div class="field"><label><span id="lblEstado"></span> <span class="req">*</span></label><input type="text" id="estado"></div>
+        </div>
+        <div class="divider"></div>
+        <div class="g2" style="margin-bottom:13px">
+          <div class="field"><label><span data-i18n="f.contact"></span> <span class="req">*</span></label><input type="text" id="responsavel" data-i18n-ph="f.contact.ph"></div>
+          <div class="field"><label><span data-i18n="f.role"></span> <span class="req">*</span></label><input type="text" id="cargo" data-i18n-ph="f.role.ph"></div>
+        </div>
+        <div class="g2">
+          <div class="field"><label><span data-i18n="f.email"></span> <span class="req">*</span></label><input type="email" id="email" data-i18n-ph="f.email.ph"></div>
+          <div class="field"><label><span data-i18n="f.phone"></span> <span class="req">*</span></label><input type="text" id="telefone"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== CERTIFICAÇÃO SGQ ===== -->
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/><path d="M9 13.5L7 22l5-3 5 3-2-8.5"/></svg>
+        <h2 data-i18n="card.cert">Quality Management System Certification</h2>
+      </div>
+      <div class="card-body">
+        <div class="field">
+          <label><span data-i18n="cert.q"></span> <span class="req">*</span></label>
+          <!-- value fica em português: é o que vai no payload do Make. -->
+          <div class="opt-group">
+            <input type="radio" class="opt-radio opt-sim" name="certSGQ" id="cert_sim" value="Sim" onchange="toggleCert()">
+            <label class="opt-label" for="cert_sim" data-i18n="cert.yes">Yes</label>
+            <input type="radio" class="opt-radio opt-nao" name="certSGQ" id="cert_nao" value="Não" onchange="toggleCert()">
+            <label class="opt-label" for="cert_nao" data-i18n="cert.no">No</label>
+          </div>
+        </div>
+        <div class="field" id="certUploadWrap" style="display:none;margin-top:14px">
+          <label><span data-i18n="cert.attach"></span> <span class="req">*</span></label>
+          <div id="certUpload"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== ESCOPOS ===== -->
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        <h2 data-i18n="card.scope">Supply Scope</h2>
+        <span class="count-pill" id="escCount">—</span>
+      </div>
+      <div class="card-body">
+        <p class="lgpd-note" id="escopoDescP" style="margin-bottom:12px"></p>
+        <div class="escopo-grid" id="escopoGrid"></div>
+      </div>
+    </div>
+
+    <!-- ===== QUESTIONÁRIO DINÂMICO ===== -->
+    <div id="questionario"></div>
+
+    <!-- ===== RESULTADO CONSOLIDADO ===== -->
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <h2 data-i18n="card.result">Assessment Result</h2>
+      </div>
+      <div class="card-body">
+        <div class="result-grid">
+          <div class="result-tile"><div class="rt-label" data-i18n="res.sgq"></div><div class="rt-val" id="resSGQ">—</div></div>
+          <div class="result-tile"><div class="rt-label" data-i18n="res.tec"></div><div class="rt-val" id="resTec">—</div></div>
+          <div class="result-tile final"><div class="rt-label" data-i18n="res.final"></div><div class="rt-val" id="resFinal">—</div></div>
+        </div>
+        <div class="result-class" id="resClass" style="background:var(--surface2);color:var(--muted)">
+          <span class="dot" style="background:var(--muted)"></span><span id="resClassTxt">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== CIÊNCIA DE EVIDÊNCIAS ===== -->
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:#C0392B;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        <h2 data-i18n="card.aware">Acknowledgement on the Submission of Evidence</h2>
+      </div>
+      <div class="card-body">
+        <div class="lgpd-note" id="txtCiencia" style="margin-bottom:16px" data-i18n-html="txt.aware"></div>
+        <label class="lgpd-accept" id="cienciEvidBox">
+          <input type="checkbox" id="cienciaEvidCheck" onchange="document.getElementById('cienciEvidBox').classList.toggle('ok',this.checked)">
+          <span><span data-i18n="aware.accept"></span> <span class="req">*</span></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- ===== AÇÕES ===== -->
+    <div id="anexosInfo" style="text-align:center;font-size:12px;color:var(--muted);margin:-.4rem 0 .9rem"></div>
+    <div class="act-bar">
+      <div class="act-group">
+        <button class="btn btn-outline" onclick="limpar()" data-i18n="btn.clear"></button>
+        <button class="btn btn-dark" onclick="baixarPDF()" data-i18n="btn.pdf"></button>
+      </div>
+      <div class="act-group">
+        <button class="btn btn-red" id="btnEnviar" onclick="enviar()" data-i18n="btn.send"></button>
+      </div>
+    </div>
+
+  </div><!-- /#conteudo -->
+  <div class="lock-hint" data-i18n="lock.hint"></div>
+
+  <div class="page-footer" data-i18n="footer"></div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================================================================
+   BANCO DE PERGUNTAS (fallback embutido — derivado do XLSX).
+   Fonte única: cada bloco é um objeto. Nada espalhado pelo código.
+   grupo:      SGQ | PRODUCAO_GERAL | ESCOPO
+   bloco_nota: SGQ | TECNICA   (define o peso 50/50 da nota final)
+   ================================================================ */
+const BANCO_PERGUNTAS = [
+  {id:"1",categoria:"Gestão da Qualidade — Organização do Fornecedor",grupo:"SGQ",bloco_nota:"SGQ",perguntas:[
+    {c:"1.1",t:"Existe Manual da Qualidade?"},
+    {c:"1.2",t:"Existe Política e Objetivos da Qualidade?"},
+    {c:"1.3",t:"Possui listagem de Normas/Procedimentos internos?"},
+    {c:"1.4",t:"Possui processo de comunicação interna e externa?"},
+    {c:"1.5",t:"Possui funções, responsabilidades e autoridades definidas em relação ao SGQ?"},
+    {c:"1.6",t:"Disponibiliza recursos essenciais para definição, implementação, manutenção e melhoria do SGQ?"},
+    {c:"1.7",t:"Possui processo de controle de competência (incluindo treinamento) do pessoal que influencia na qualidade do produto/serviço?"},
+    {c:"1.8",t:"Disponibiliza, administra e mantém o ambiente de trabalho necessário para atingir conformidade com os requisitos aplicáveis?"},
+    {c:"1.9",t:"Possui processo de controle de documentos incluindo sistemática para controle de emissão/revisão?"},
+    {c:"1.10",t:"Possui processo de controle de registros?"},
+    {c:"1.11",t:"Possui requisitos do cliente, legais e outros aplicáveis definidos?"},
+    {c:"1.12",t:"Identifica e planeja os processos e documentos necessários para a realização do serviço/produto?"},
+    {c:"1.13",t:"Identifica e realiza a gestão dos riscos para a realização do serviço/produto?"},
+    {c:"1.14",t:"Possui controle e processos sobre a propriedade do cliente?"},
+    {c:"1.15",t:"Possui processo de gestão de estoque e realiza controle e preservação de produtos?"},
+    {c:"1.16",t:"Possui controle de não conformidades, ação corretiva e preventiva?"},
+    {c:"1.17",t:"Possui processo de gestão da mudança?"},
+    {c:"1.18",t:"Realiza a medição, análise e melhoria do SGQ?"}
+  ]},
+  {id:"2",categoria:"Gestão da Qualidade — Suprimentos",grupo:"SGQ",bloco_nota:"SGQ",perguntas:[
+    {c:"2.1",t:"Existe sistemática para seleção, qualificação e avaliação de fornecedores?"},
+    {c:"2.2",t:"Existe sistemática para tratamento do material não-conforme no recebimento, assegurando que não seja utilizado/instalado?"}
+  ]},
+  {id:"3",categoria:"Gestão da Qualidade — Saúde, Segurança e Meio Ambiente (SMS)",grupo:"SGQ",bloco_nota:"SGQ",perguntas:[
+    {c:"3.1",t:"Existe manual de SSO (Segurança e Saúde Ocupacional)?"},
+    {c:"3.2",t:"Existe Programa de Prevenção de Riscos Ambientais (PPRA)?"},
+    {c:"3.3",t:"Possui Programa de Controle Médico e Saúde Ocupacional (PCMSO)?"},
+    {c:"3.4",t:"Possui indicadores de Taxa de Acidente com e sem Afastamento?"},
+    {c:"3.5",t:"Possui SESMT, conforme NR-04 (M.T.E.)?"},
+    {c:"3.6",t:"Possui CIPA?"},
+    {c:"3.7",t:"Possui sistemática de avaliação e investigação de acidentes, com metodologia de análise de causas considerando fatores humanos?"},
+    {c:"3.8",t:"Possui plano de treinamento em SMS?"},
+    {c:"3.9",t:"Possui plano de gerenciamento de resíduos?"},
+    {c:"3.10",t:"Possui Licença de Operação expedida por Órgão Ambiental (informar nº nos comentários)?"},
+    {c:"3.11",t:"Possui processo para análise de risco operacional?"},
+    {c:"3.12",t:"Possui lista de controle de EPIs apropriados conforme as atividades a serem realizadas?"}
+  ]},
+  {id:"4",categoria:"Gestão da Qualidade — Outros Requisitos",grupo:"SGQ",bloco_nota:"SGQ",perguntas:[
+    {c:"4.1",t:"Possui política/procedimento de gestão de ativos e indicadores (KPIs) com metas estabelecidas?"},
+    {c:"4.2",t:"Possui política/procedimento de segurança da informação, cibersegurança e privacidade e indicadores (KPIs) com metas?"},
+    {c:"4.3",t:"Possui sistemática implementada para tratamento de dados pessoais com base na LGPD?"},
+    {c:"4.4",t:"Possui iniciativas/projetos para eficiência energética e/ou controle de emissão de gases de efeito estufa (GEE)?"},
+    {c:"4.5",t:"Possui gestão/política de compliance e gestão/política antissuborno?"},
+    {c:"4.6",t:"Possui mecanismos que garantam o respeito aos Direitos Humanos (princípios fundamentais do trabalho da OIT)?"},
+    {c:"4.7",t:"Possui código de conduta publicamente acessível, aprovado pela alta administração, com diretrizes de direitos humanos?"}
+  ]},
+  {id:"5",categoria:"Processos de Produção — Geral",grupo:"PRODUCAO_GERAL",bloco_nota:"TECNICA",perguntas:[
+    {c:"5.1",t:"Existe programação de produto/serviço que permita atender ao cronograma de entrega previamente estabelecido?"},
+    {c:"5.2",t:"Existe maquinário e ferramental adequado para execução dos serviços/produtos (descrever nos comentários)?"},
+    {c:"5.3",t:"Possui procedimento operacional para execução do serviço/produto, incluindo instruções/folhas de processo?"},
+    {c:"5.4",t:"Possui programação de manutenção preventiva dos equipamentos de produção ou para execução de serviços?"},
+    {c:"5.5",t:"Possui sistemática para identificação do produto e sua situação de inspeção durante a produção/execução?"},
+    {c:"5.6",t:"Possui sistemática que define o tratamento de material/serviço não-conforme na produção/execução?"},
+    {c:"5.7",t:"Possui sistemática para identificação do produto e sua situação no estoque?"},
+    {c:"5.8",t:"Possui sistemática para armazenamento, manuseio e preservação do produto acabado?"}
+  ]},
+  {id:"6",categoria:"Produção — Soldagem",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"6.1",t:"Existência de Procedimentos de Soldagem qualificados?"},
+    {c:"6.2",t:"Existência de estufas para secagem de eletrodos?"},
+    {c:"6.3",t:"Existência de estufas para manutenção da secagem de eletrodos?"},
+    {c:"6.4",t:"Existência de estufas para armazenamento de eletrodos?"},
+    {c:"6.5",t:"Existe rotina de calibração das máquinas de solda?"},
+    {c:"6.6",t:"Os termômetros/termo-higrômetros das estufas estão calibrados?"},
+    {c:"6.7",t:"Possui inspetor nível 1 qualificado para acompanhamento do processo de soldagem?"}
+  ]},
+  {id:"7",categoria:"Produção — Pintura e Hidrojateamento",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"7.1",t:"Existência de procedimentos de pintura (conforme requisitos dos clientes)?"},
+    {c:"7.2",t:"Existe área específica para pintura isenta de contaminantes (poeira, óleos e graxas)?"},
+    {c:"7.3",t:"Existência de local com temperatura e umidade controladas para pintura em condições adversas?"},
+    {c:"7.4",t:"Possui inspetor nível 1 qualificado para acompanhamento do processo de pintura?"}
+  ]},
+  {id:"8",categoria:"Produção — Usinagem",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"8.1",t:"Existência de tornos com capacidade para atender a demanda de fabricação?"},
+    {c:"8.2",t:"Existe layout produtivo definido e fluxo adequado de fabricação, inspeção e expedição?"},
+    {c:"8.4",t:"Possui capacidade para atendimento emergencial/turnaround?"},
+    {c:"8.5",t:"Possui experiência comprovada no segmento de óleo e gás?"},
+    {c:"8.6",t:"Possui referências técnicas relevantes e rastreáveis?"},
+    {c:"8.8",t:"Possui plano de calibração vigente para os instrumentos de medição?"},
+    {c:"8.9",t:"Os certificados de calibração possuem rastreabilidade RBC/INMETRO?"},
+    {c:"8.10",t:"Possui instrumentos adequados para inspeção dimensional e de roscas API?"},
+    {c:"8.11",t:"Existe controle de validade e identificação dos instrumentos?"},
+    {c:"8.12",t:"Atende às normas API aplicáveis?"},
+    {c:"8.13",t:"Existem registros rastreáveis das inspeções realizadas?"}
+  ]},
+  {id:"9",categoria:"Produção — Laboratório de Calibração",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"9.1",t:"Sistemática definindo a calibração de instrumentos dentro dos prazos pré-estabelecidos?"},
+    {c:"9.2",t:"Credenciamento junto ao Instituto Local (descrever o nome, ex.: RBC no Brasil)?"},
+    {c:"9.3",t:"Possui padrões rastreados nacional ou internacionalmente?"},
+    {c:"9.4",t:"Possui procedimento de calibração de instrumentos?"},
+    {c:"9.5",t:"Possui evidência de treinamento da equipe de metrologia?"}
+  ]},
+  {id:"10",categoria:"Matéria-Prima Metálica (aço, latão, tarugos, barras, forjados, fundidos)",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"10.1",t:"Emite certificado de qualidade (3.1/3.2 conforme EN 10204) para cada lote?"},
+    {c:"10.2",t:"Possui rastreabilidade do material por número de corrida/lote (heat/melt number) da usina?"},
+    {c:"10.3",t:"Realiza/comprova análise química e ensaios mecânicos conforme especificação (API 6A, API 5CT, ASTM, AISI, NACE MR0175)?"},
+    {c:"10.4",t:"Os materiais atendem aos requisitos de serviço ácido (sour service/H2S) quando aplicável?"},
+    {c:"10.5",t:"Possui controle de estoque com FIFO e identificação por especificação/dimensão?"},
+    {c:"10.6",t:"Possui sistemática para preservação contra corrosão durante armazenamento e transporte?"}
+  ]},
+  {id:"11",categoria:"Tratamento Térmico",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"11.1",t:"Possui fornos com registro contínuo de temperatura e calibração vigente dos termopares/instrumentos?"},
+    {c:"11.2",t:"Os fornos são qualificados conforme AMS 2750 (TUS), API 6A ou equivalente?"},
+    {c:"11.3",t:"Possui procedimento qualificado para cada tipo de tratamento (têmpera, revenimento, normalização, alívio de tensão)?"},
+    {c:"11.4",t:"Emite relatório de tratamento térmico com gráficos de temperatura × tempo rastreáveis ao lote?"},
+    {c:"11.5",t:"Realiza ensaios mecânicos pós-tratamento (dureza, tração, impacto) conforme requisitos do produto?"}
+  ]},
+  {id:"13",categoria:"Ferramentas de Corte, Pastilhas e Abrasivos",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"13.1",t:"Os produtos possuem identificação clara de fabricante, código, geometria, classe/grade e norma aplicável (ISO, ANSI)?"},
+    {c:"13.2",t:"Possui rastreabilidade de lote dos produtos fornecidos?"},
+    {c:"13.3",t:"Disponibiliza suporte técnico para seleção, parametrização e otimização de processo?"},
+    {c:"13.4",t:"Possui estoque mínimo/pronta entrega para itens críticos definidos com o cliente?"}
+  ]},
+  {id:"14",categoria:"Tintas e Revestimentos",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"14.1",t:"Emite Boletim Técnico (TDS) e FISPQ/SDS atualizados para cada produto?"},
+    {c:"14.2",t:"Os produtos atendem às normas/sistemas de pintura aplicáveis (NORSOK M-501, ISO 12944, Petrobras N-2912 etc.)?"},
+    {c:"14.3",t:"Possui rastreabilidade de lote e prazo de validade (shelf life) declarado em cada embalagem?"},
+    {c:"14.4",t:"Emite certificado de qualidade do produto (CoA) com resultados de ensaios físico-químicos por lote?"}
+  ]},
+  {id:"15",categoria:"Produtos Químicos (óleos, solventes, insumos para reações)",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"15.1",t:"Emite FISPQ/SDS conforme NBR 14725/GHS para todos os produtos fornecidos?"},
+    {c:"15.2",t:"Emite Certificado de Análise (CoA) por lote com parâmetros físico-químicos rastreáveis?"},
+    {c:"15.3",t:"Possui controle de lote, validade e condições de armazenamento adequadas (temperatura, ventilação, segregação)?"},
+    {c:"15.4",t:"Possui licenciamento e autorizações específicas (Polícia Federal, Exército, IBAMA, ANP) conforme aplicável?"},
+    {c:"15.5",t:"Realiza o transporte conforme regulamentação de produtos perigosos (ANTT/ADR), com motorista MOPP e veículo adequado?"}
+  ]},
+  {id:"16",categoria:"Elastômeros, Vedações e Vulcanização (O-rings, gaxetas, retentores)",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"16.1",t:"Os compostos são identificados por código/material (NBR, HNBR, FKM, FFKM, AFLAS etc.) com rastreabilidade ao lote de borracha?"},
+    {c:"16.2",t:"Emite certificado com propriedades físicas (dureza, tração, alongamento, compression set) por lote?"},
+    {c:"16.3",t:"Os produtos atendem aos requisitos NORSOK M-710, API 6A Annex F, ISO 23936 ou equivalentes quando aplicáveis?"},
+    {c:"16.4",t:"Possui controle de validade (shelf life) conforme ARP5316/ISO 2230 e armazenamento controlado?"},
+    {c:"16.5",t:"Para serviços de vulcanização, possui procedimento qualificado e controle de parâmetros (temperatura, pressão, tempo)?"}
+  ]},
+  {id:"17",categoria:"Molas",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"17.1",t:"Possui projeto/cálculo da mola documentado com parâmetros de força, deslocamento e vida útil?"},
+    {c:"17.2",t:"Realiza ensaios de carga, dureza e dimensional por lote?"},
+    {c:"17.3",t:"Realiza tratamento térmico (alívio de tensão) e shot peening quando aplicável, com registros rastreáveis?"},
+    {c:"17.4",t:"Possui rastreabilidade da matéria-prima (fio/aço) ao certificado de origem?"}
+  ]},
+  {id:"18",categoria:"Ensaios Não Destrutivos (END)",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"18.1",t:"Possui inspetores qualificados/certificados conforme SNQC, ASNT SNT-TC-1A, ISO 9712 ou equivalente para os métodos executados?"},
+    {c:"18.2",t:"Possui procedimentos escritos e aprovados para cada método (LP, PM, US, RX, AE, ECT)?"},
+    {c:"18.3",t:"Os equipamentos de END possuem calibração/verificação periódica com registros rastreáveis?"},
+    {c:"18.4",t:"Os consumíveis (reveladores, penetrantes, partículas, filmes) possuem certificado e estão dentro da validade?"},
+    {c:"18.5",t:"Emite relatórios de inspeção rastreáveis ao item, com critério de aceitação claramente referenciado?"},
+    {c:"18.6",t:"Possui licença CNEN vigente para uso de fontes radioativas quando aplicável?"}
+  ]},
+  {id:"19",categoria:"Instrumentos de Medição (fabricante/revendedor)",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"19.1",t:"Os instrumentos são fornecidos com certificado de calibração rastreável (RBC/INMETRO ou equivalente internacional)?"},
+    {c:"19.2",t:"Possui assistência técnica autorizada e prazo definido para manutenção corretiva no Brasil?"},
+    {c:"19.3",t:"Disponibiliza unidade reserva (loaner) durante manutenção/calibração de itens críticos?"},
+    {c:"19.4",t:"Os instrumentos possuem manual técnico e declaração de conformidade aplicável (INMETRO, CE, ATEX quando aplicável)?"}
+  ]},
+  {id:"20",categoria:"SaaS, Software e Serviços de TI",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"20.1",t:"Possui certificação ou aderência declarada a normas de segurança da informação (ISO 27001, SOC 2)?"},
+    {c:"20.2",t:"Está em conformidade com a LGPD, com DPO designado e contrato com cláusula de tratamento de dados?"},
+    {c:"20.3",t:"Possui SLA contratual com uptime garantido, suporte técnico e tempo de resposta para incidentes?"},
+    {c:"20.4",t:"Possui plano de backup, recuperação de desastres (DR) e portabilidade de dados em caso de descontinuidade?"},
+    {c:"20.5",t:"Os dados ficam armazenados em data centers com certificação reconhecida (Tier III+, ISO 27001) e localização declarada?"}
+  ]},
+  {id:"21",categoria:"Logística, Prazo e Capacidade de Entrega",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"21.1",t:"Possui indicador de OTD (On-Time Delivery) com meta estabelecida e histórico disponível ao cliente?"},
+    {c:"21.2",t:"Comunica proativamente desvios de prazo e fornece plano de recuperação (Recovery Plan)?"},
+    {c:"21.3",t:"Possui capacidade de atendimento emergencial/pedidos hot-shot fora do prazo padrão?"},
+    {c:"21.4",t:"Possui sistemática de embalagem, marcação e identificação adequadas para transporte rodoviário/marítimo de longa distância?"},
+    {c:"21.5",t:"Emite documentação fiscal e técnica completa (NF, CoA, Databook, Romaneio) junto com a expedição?"}
+  ]},
+  {id:"22",categoria:"Ensaios Destrutivos",grupo:"ESCOPO",bloco_nota:"TECNICA",perguntas:[
+    {c:"22.1",t:"O laboratório é acreditado pelo INMETRO (CGCRE) ou organismo equivalente internacionalmente reconhecido (ILAC MRA)?"},
+    {c:"22.2",t:"O escopo de acreditação cobre os métodos/normas aplicáveis (ASTM E8/E8M, E23, E10/E18/E92, E290, ISO 6892, 148, 6506/6507/6508 etc.)?"},
+    {c:"22.3",t:"Possui sistema de gestão da qualidade laboratorial implementado conforme ISO/IEC 17025?"},
+    {c:"22.4",t:"O pessoal técnico é qualificado, treinado e com evidência de competência documentada para cada tipo de ensaio?"},
+    {c:"22.5",t:"Possui procedimentos documentados e aprovados para cada tipo de ensaio destrutivo, com referência às normas vigentes?"},
+    {c:"22.6",t:"Realiza ensaios de tração (LRT, LE e Alongamento) conforme ASTM E8/E8M ou ISO 6892-1, com corpos de prova usinados conforme a norma?"},
+    {c:"22.7",t:"A máquina de tração possui calibração rastreável vigente conforme ISO 7500-1 ou ASTM E4, com incerteza documentada?"},
+    {c:"22.8",t:"Realiza ensaios de impacto Charpy (energia absorvida e expansão lateral) conforme ASTM E23 ou ISO 148-1, inclusive temperaturas negativas quando requerido?"},
+    {c:"22.9",t:"O equipamento Charpy é verificado com corpos de prova de referência certificados (CVN) e possui calibração rastreável vigente?"},
+    {c:"22.10",t:"Realiza ensaios de dobramento (Guided Bend Test) conforme ASTM E290, API 1104 ou norma aplicável, com controle de ângulo e diâmetro do punção?"},
+    {c:"22.11",t:"Realiza ensaios de dureza pelos métodos aplicáveis (Brinell E10/ISO 6506; Rockwell E18/ISO 6508; Vickers E92/ISO 6507) com equipamentos calibrados e rastreados?"},
+    {c:"22.12",t:"Os durômetros são verificados com blocos padrão certificados antes de cada sequência de ensaios, com registros documentados?"},
+    {c:"22.13",t:"Possui capacidade para ensaios de fluência (Creep) e ruptura por fluência conforme ASTM E139 ou ISO 204, com controle de temperatura (±1°C) e carga?"},
+    {c:"22.14",t:"Possui rastreabilidade completa dos corpos de prova ao material de origem (heat number, lote, posição), mantida durante todo o ensaio?"},
+    {c:"22.15",t:"Os relatórios de ensaio são emitidos conforme ISO/IEC 17025 ou contêm identificação do cliente, material, norma, resultados, critério de aceitação, conclusão e assinatura do responsável técnico?"}
+  ]}
+];
+
+/* ================================================================
+   ESCOPOS (fallback embutido). Você substituirá por escopos.csv.
+   tipo: "produto" carrega Produção Geral; "servico" não carrega.
+   blocos: ids de BANCO_PERGUNTAS carregados por este escopo.
+   ================================================================ */
+let ESCOPOS = [
+  {nome:"Matéria-Prima Metálica",        tipo:"produto", blocos:["10"]},
+  {nome:"Tratamento Térmico",            tipo:"produto", blocos:["11"]},
+  {nome:"Usinagem",                      tipo:"produto", blocos:["8"]},
+  {nome:"Soldagem",                      tipo:"produto", blocos:["6"]},
+  {nome:"Pintura e Hidrojateamento",     tipo:"produto", blocos:["7"]},
+  {nome:"Ferramentas de Corte e Abrasivos",tipo:"produto",blocos:["13"]},
+  {nome:"Tintas e Revestimentos",        tipo:"produto", blocos:["14"]},
+  {nome:"Produtos Químicos",             tipo:"produto", blocos:["15"]},
+  {nome:"Elastômeros e Vedações",        tipo:"produto", blocos:["16"]},
+  {nome:"Molas",                         tipo:"produto", blocos:["17"]},
+  {nome:"Instrumentos de Medição",       tipo:"produto", blocos:["19"]},
+  {nome:"Laboratório de Calibração",     tipo:"servico", blocos:["9"]},
+  {nome:"Ensaios Não Destrutivos (END)", tipo:"servico", blocos:["18"]},
+  {nome:"Ensaios Destrutivos",           tipo:"servico", blocos:["22"]},
+  {nome:"SaaS / Software e Serviços de TI",tipo:"servico",blocos:["20"]},
+  {nome:"Logística e Transporte",        tipo:"servico", blocos:["21"]}
+];
+
+/* ================================================================
+   ESTADO
+   ================================================================ */
+let blocosMap = {};                 // id -> bloco
+let escoposSel = [];                // nomes de escopos selecionados (SEMPRE em português — são a chave dos blocos)
+let respostas = {};                 // qid -> {status, comentario}
+let arquivoCNPJ = null, arquivoCert = null;
+let rastreabilidade = "";
+let escoposBloqueadosURL = false;
+let sgqAutoFilled = false;
+let dataHoraPreenchimento = "";     // formato pt-BR — é o que vai no payload do Make
+let dataHoraDisplay = "";           // formato do idioma escolhido — tela e PDF do fornecedor
+let linkPastaEvidencias = "";
+let paisSel = "";                   // código ISO alpha-2 do país (só na tela; entra no endereço do payload)
+// A visibilidade dos blocos é decidida SOMENTE por b.grupo (SGQ / PRODUCAO_GERAL / ESCOPO)
+// e pelo mapeamento escopo→blocos da aba "Escopo". Nunca fixar id de bloco no código:
+// a numeração da planilha muda (ex.: bloco 5 já foi "Produção Geral" e hoje é "Tintas").
+
+/* ================================================================
+   HELPERS
+   ================================================================ */
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function qid(blocoId,c){return 'q_'+blocoId+'_'+String(c).replace(/\./g,'_');}
+/* Obs.: a variável local NÃO pode se chamar "t" — esse nome é a função de
+   tradução global (i18n.js) e seria sombreada aqui dentro. */
+function showToast(msg,type=''){const el=document.getElementById('toast');el.textContent=msg;el.className='toast'+(type?' '+type:'');el.classList.add('show');setTimeout(()=>el.classList.remove('show'),4000);}
+function faixaDe(score){for(const f of FAIXAS){if(score>=f.min&&score<=f.max)return f;}return FAIXAS[0];}
+function fmtNota(n){return fmtNotaL(n,APP_LANG);}
+
+function maskCNPJ(el){let v=el.value.replace(/\D/g,'').slice(0,14);
+  v=v.replace(/^(\d{2})(\d)/,'$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/,'$1.$2.$3')
+     .replace(/\.(\d{3})(\d)/,'.$1/$2').replace(/(\d{4})(\d)/,'$1-$2');el.value=v;}
+function maskTel(el){let v=el.value.replace(/\D/g,'').slice(0,11);
+  if(v.length>10)v=v.replace(/^(\d{2})(\d{5})(\d{4}).*/,'($1) $2-$3');
+  else if(v.length>6)v=v.replace(/^(\d{2})(\d{4})(\d{0,4}).*/,'($1) $2-$3');
+  else if(v.length>2)v=v.replace(/^(\d{2})(\d{0,5})/,'($1) $2');
+  else if(v.length>0)v=v.replace(/^(\d{0,2})/,'($1');el.value=v;}
+
+/* Texto de um campo multilíngue vindo da planilha, no idioma corrente. */
+function tf(campo){ return tField(campo, APP_LANG); }
+
+/* ================================================================
+   IDIOMA
+   Ordem de decisão:
+     1. ?lang=xx no link (o comprador pode já mandar no idioma certo);
+     2. tela de escolha — SEMPRE aparece, em toda abertura/atualização
+        da página, para não presumir o idioma de quem está respondendo.
+   Enquanto a escolha não é feita, o formulário por trás fica no inglês
+   (LANG_DEFAULT) — o idioma do navegador não é usado, para que o
+   formulário abra igual para todo mundo no mundo inteiro.
+   ================================================================ */
+function idiomaInicial(){
+  try{
+    const qp=new URLSearchParams(window.location.search);
+    const url=(qp.get('lang')||'').trim().toLowerCase();
+    if(isLangValid(url)) return {lang:url, perguntar:false};
+  }catch(e){}
+  return {lang:LANG_DEFAULT, perguntar:true};
+}
+
+/* Aplica um idioma à página inteira e redesenha tudo que é dinâmico. */
+function setLang(lang){
+  if(!isLangValid(lang)) lang=LANG_DEFAULT;
+  APP_LANG=lang;
+  document.documentElement.lang=(LOCALE[lang]||'en-US');
+  document.title=t('ui.title');
+  aplicarI18n();
+  renderLangBtn();
+  definirDataHora();          // reformata a data no locale novo
+  renderCountrySelect();      // nomes de país no idioma novo
+  aplicarPais();              // rótulos de CNPJ/Tax ID, UF, telefone
+  renderCNPJUpload(); renderCertUpload();
+  renderPastaEvid();
+  renderEscopos(); renderPerguntas(); atualizar();
+  carregarTextosExternos();   // textos da planilha na coluna do idioma novo
+}
+
+/* Substitui o conteúdo de todo elemento marcado no HTML:
+     data-i18n       -> textContent      data-i18n-html -> innerHTML
+     data-i18n-ph    -> placeholder                                   */
+function aplicarI18n(){
+  document.querySelectorAll('[data-i18n]').forEach(el=>{ el.textContent=t(el.getAttribute('data-i18n')); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el=>{ el.innerHTML=t(el.getAttribute('data-i18n-html')); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el=>{ el.placeholder=t(el.getAttribute('data-i18n-ph')); });
+}
+
+/* ---- Tela de escolha inicial ----
+   O texto sai em inglês (o padrão do portal); os botões trazem bandeira
+   e o nome de cada idioma escrito nele mesmo, que é o que realmente
+   orienta quem não lê inglês. */
+function renderLangGate(){
+  const gate=document.getElementById('langGate');
+  document.getElementById('langGateTitle').textContent=T(LANG_DEFAULT,'lang.title');
+  document.getElementById('langGateSub').textContent=T(LANG_DEFAULT,'lang.sub');
+  // Português vem em destaque e em 1º lugar na grade — a Perpec é uma
+  // empresa brasileira — mas o texto do popup permanece sempre em inglês.
+  const ordenado=[...LANGS].sort((a,b)=>(a.code==='pt'?-1:b.code==='pt'?1:0));
+  document.getElementById('langGateGrid').innerHTML=ordenado.map(l=>
+    '<button type="button" class="lang-opt'+(l.code==='pt'?' lang-opt-default':'')+'" onclick="escolherIdioma(\''+l.code+'\')">'
+    +'<span class="flag">'+l.flag+'</span><span>'+esc(l.nome)+'</span></button>').join('');
+  gate.hidden=false;
+}
+function escolherIdioma(code){
+  document.getElementById('langGate').hidden=true;
+  setLang(code);
+  if(pdfLangOf(code)!==code) showToast(t('toast.pdfEn'));
+}
+
+/* ---- Botão e menu no cabeçalho ---- */
+function renderLangBtn(){
+  const info=langInfo(APP_LANG);
+  document.getElementById('langBtnFlag').textContent=info.flag;
+  document.getElementById('langBtnName').textContent=info.nome;
+  document.getElementById('langBtn').setAttribute('aria-label',t('lang.label'));
+  document.getElementById('langMenu').innerHTML=LANGS.map(l=>
+    '<button type="button" class="lang-item'+(l.code===APP_LANG?' sel':'')+'" onclick="trocarIdioma(\''+l.code+'\')">'
+    +'<span class="flag">'+l.flag+'</span><span>'+esc(l.nome)+'</span></button>').join('');
+}
+function toggleLangMenu(ev){
+  if(ev) ev.stopPropagation();
+  const m=document.getElementById('langMenu');
+  const aberto=m.classList.toggle('open');
+  document.getElementById('langBtn').setAttribute('aria-expanded',aberto?'true':'false');
+}
+function trocarIdioma(code){
+  document.getElementById('langMenu').classList.remove('open');
+  document.getElementById('langBtn').setAttribute('aria-expanded','false');
+  if(code===APP_LANG) return;
+  setLang(code);
+  if(pdfLangOf(code)!==code) showToast(t('toast.pdfEn'));
+}
+document.addEventListener('click',()=>{
+  const m=document.getElementById('langMenu');
+  if(m && m.classList.contains('open')){
+    m.classList.remove('open');
+    document.getElementById('langBtn').setAttribute('aria-expanded','false');
+  }
+});
+
+/* ================================================================
+   INICIALIZAÇÃO
+   ================================================================ */
+window.onload = async () => {
+  // 1) Idioma primeiro: tudo que é desenhado depois já sai traduzido.
+  const ini = idiomaInicial();
+  APP_LANG = ini.lang;
+  document.documentElement.lang = (LOCALE[APP_LANG]||'en-US');
+  document.title = t('ui.title');
+  aplicarI18n(); renderLangBtn();
+
+  document.getElementById('docRef').textContent = CONFIG.DOC_REF;
+  carregarRastreabilidade();
+  definirDataHora();
+  carregarLinkPasta();
+  renderCountrySelect(); aplicarPais();
+  await carregarEscoposExternos();
+  await carregarPerguntasExternas();
+  await carregarTextosExternos();
+  BANCO_PERGUNTAS.forEach(b=>blocosMap[b.id]=b);
+  renderCNPJUpload(); renderCertUpload();
+  carregarEscoposDaURL(); renderEscopos(); renderPerguntas(); atualizar();
+  carregarLogo();
+
+  // 2) Só então a tela de escolha, já com tudo montado por trás.
+  if(ini.perguntar) renderLangGate();
+};
+
+/* ================================================================
+   PAÍS
+   O país existe apenas na interface: ele decide se os campos seguem
+   as regras brasileiras (CNPJ, UF, telefone) ou o formato livre
+   internacional. No payload enviado ao Make ele entra ANEXADO AO
+   ENDEREÇO — nenhum campo é criado, removido ou renomeado, para não
+   quebrar o cenário do Make nem a integração com o Monday.
+   ================================================================ */
+function renderCountrySelect(){
+  const sel=document.getElementById('pais'); if(!sel) return;
+  const atual=paisSel;
+  const lista=countryList(APP_LANG);
+  sel.innerHTML='<option value="">'+esc(t('f.country.ph'))+'</option>'
+    + lista.map(c=>'<option value="'+c.code+'">'+esc(c.name)+'</option>').join('');
+  sel.value=atual||'';
+}
+
+/* True quando o fornecedor é brasileiro (ou ainda não escolheu o país:
+   mantém o comportamento original do formulário até ele escolher). */
+function paisEhLocal(){ return !paisSel || paisSel===PAIS_LOCAL; }
+
+/* Reconfigura rótulos, placeholders, máscaras e limites conforme o país. */
+function aplicarPais(){
+  const sel=document.getElementById('pais');
+  if(sel) paisSel=sel.value||'';
+  const br=paisEhLocal();
+
+  const lbl=(id,chave)=>{const el=document.getElementById(id); if(el) el.textContent=t(chave);};
+  lbl('lblTaxId',  br?'f.taxid.br' :'f.taxid');
+  lbl('lblTaxDoc', br?'f.taxdoc.br':'f.taxdoc');
+  lbl('lblEstado', br?'f.state.br' :'f.state');
+
+  // CNPJ: máscara e limite só no Brasil; fora dele, identificação livre.
+  const cnpj=document.getElementById('cnpj');
+  if(cnpj){
+    cnpj.placeholder=t(br?'f.taxid.ph.br':'f.taxid.ph');
+    cnpj.oninput = br ? function(){maskCNPJ(this);} : null;
+    if(br) cnpj.setAttribute('maxlength','18'); else cnpj.removeAttribute('maxlength');
+  }
+  // Estado: UF de 2 letras maiúsculas no Brasil; texto livre fora dele.
+  const uf=document.getElementById('estado');
+  if(uf){
+    uf.placeholder=t(br?'f.state.ph.br':'f.state.ph');
+    uf.oninput = br ? function(){this.value=this.value.toUpperCase().replace(/[^A-Z]/g,'');} : null;
+    if(br) uf.setAttribute('maxlength','2'); else uf.removeAttribute('maxlength');
+  }
+  // Telefone: máscara brasileira ou formato internacional livre.
+  const tel=document.getElementById('telefone');
+  if(tel){
+    tel.placeholder=t(br?'f.phone.ph.br':'f.phone.ph');
+    tel.oninput = br ? function(){maskTel(this);} : null;
+    if(br) tel.setAttribute('maxlength','16'); else tel.setAttribute('maxlength','24');
+  }
+}
+
+/* Número de rastreabilidade — definido internamente e embutido no link via ?ras= */
+function carregarRastreabilidade(){
+  try{ const qp=new URLSearchParams(window.location.search); rastreabilidade=(qp.get('ras')||'').trim(); }
+  catch(e){ rastreabilidade=''; }
+  atualizarRastreabilidade();
+}
+function atualizarRastreabilidade(){
+  document.getElementById('hdrRastreabilidade').textContent=rastreabilidade||'—';
+  const f=document.getElementById('rastreabilidadeField'); if(f) f.value=rastreabilidade;
+}
+
+/* Escopos pré-definidos no link via ?escopos=nome1|nome2|... */
+function carregarEscoposDaURL(){
+  try{
+    const qp=new URLSearchParams(window.location.search);
+    const param=(qp.get('escopos')||'').trim();
+    if(!param){ escoposBloqueadosURL=false; return; }
+    const nomes=param.split('|').map(s=>s.trim()).filter(Boolean);
+    if(!nomes.length){ escoposBloqueadosURL=false; return; }
+    escoposSel=nomes;
+    escoposBloqueadosURL=true;
+  }catch(e){ escoposBloqueadosURL=false; }
+}
+
+/* Data/hora do preenchimento — fixada automaticamente ao abrir o formulário.
+   São mantidas DUAS formas do mesmo instante:
+     dataHoraPreenchimento -> sempre pt-BR, é o que segue no payload do Make
+       (o cenário do Make/Monday já espera esse formato — não mude);
+     dataHoraDisplay       -> no idioma escolhido, para a tela e o PDF dele.  */
+let _instantePreenchimento = null;
+function definirDataHora(){
+  if(!_instantePreenchimento) _instantePreenchimento=new Date();
+  dataHoraPreenchimento=_instantePreenchimento.toLocaleString('pt-BR');
+  dataHoraDisplay=fmtDataHora(_instantePreenchimento,APP_LANG);
+  const f=document.getElementById('dataHoraField'); if(f) f.value=dataHoraDisplay;
+}
+
+/* Link da pasta de evidências — pré-preenchido via parâmetro de URL (?pasta=...)
+   Cada fornecedor recebe um link diferente, com a pasta específica dele. */
+function carregarLinkPasta(){
+  try{
+    const qp=new URLSearchParams(window.location.search);
+    linkPastaEvidencias=(qp.get('pasta')||'').trim();
+  }catch(e){ linkPastaEvidencias=''; }
+  renderPastaEvid();
+}
+function renderPastaEvid(){
+  const wrap=document.getElementById('pastaEvidWrap'); if(!wrap) return;
+  if(!linkPastaEvidencias){
+    wrap.innerHTML='<div class="q-warn show">'+esc(t('evid.none'))+'</div>';
+    return;
+  }
+  // Garante que o URL tenha protocolo (senão o navegador trata como relativo)
+  const url=linkPastaEvidencias.match(/^https?:\/\//) ? linkPastaEvidencias : 'https://'+linkPastaEvidencias;
+  wrap.innerHTML='<a class="btn btn-red" href="'+esc(url)+'" target="_blank" rel="noopener">'+esc(t('evid.open'))+'</a>';
+}
+
+/* ----- carga de dados externos (Planilha Google → fallback CSV local) -----
+
+   Fonte primária: abas da Planilha Google (export CSV via endpoint gviz),
+   o que permite editar perguntas/escopos sem novo commit no Git.
+   Se a planilha falhar (offline, sem permissão), tenta o CSV local;
+   se ambos falharem, mantém o banco embutido (fallback final).            */
+
+/* URL de export CSV de uma aba da planilha. cache-busting (&_) evita
+   que o navegador sirva uma versão antiga em cache. */
+function urlSheetCSV(aba){
+  if(!CONFIG.SHEET_ID) return null;
+  return 'https://docs.google.com/spreadsheets/d/'+CONFIG.SHEET_ID
+       + '/gviz/tq?tqx=out:csv&sheet='+encodeURIComponent(aba)
+       + '&_='+Date.now();
+}
+
+/* Parser de CSV robusto (RFC 4180): lida com aspas, vírgulas dentro de
+   células e quebras de linha. Detecta automaticamente o separador (',' do
+   Google Sheets ou ';' dos CSVs locais). Retorna matriz de linhas/células. */
+function parseCSV(text){
+  text=String(text||'').replace(/^﻿/,'');            // remove BOM
+  // separador: ';' só se houver mais ';' que ',' na 1ª linha (CSV local pt-BR)
+  const head=(text.split('\n')[0]||'');
+  const sep=( (head.split(';').length-1) > (head.split(',').length-1) ) ? ';' : ',';
+  const rows=[]; let row=[], val='', q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(q){
+      if(ch==='"'){ if(text[i+1]==='"'){val+='"';i++;} else q=false; }
+      else val+=ch;
+    }else{
+      if(ch==='"') q=true;
+      else if(ch===sep){ row.push(val); val=''; }
+      else if(ch==='\n'){ row.push(val); rows.push(row); row=[]; val=''; }
+      else if(ch==='\r'){ /* ignora */ }
+      else val+=ch;
+    }
+  }
+  if(val!==''||row.length){ row.push(val); rows.push(row); }
+  return rows.filter(r=>r.some(c=>String(c).trim()!==''));   // descarta linhas vazias
+}
+
+/* Busca a 1ª fonte que retornar conteúdo válido. */
+async function fetchTextoPrimeiroOk(urls){
+  for(const u of urls){
+    if(!u) continue;
+    try{
+      const r=await fetch(u,{cache:'no-store'});
+      if(!r.ok) continue;
+      const txt=await r.text();
+      if(txt && txt.trim()) return txt;
+    }catch(e){/* tenta a próxima fonte */}
+  }
+  return null;
+}
+
+/* ----- Mapeamento de colunas POR NOME de cabeçalho ------------------
+   Antes as colunas eram lidas por posição, o que impedia acrescentar
+   colunas de tradução. Agora o cabeçalho é lido e cada coluna é
+   localizada pelo nome, então a ordem na planilha é livre.
+   Devolve null se a 1ª linha não parecer um cabeçalho (planilha antiga
+   sem cabeçalho) — nesse caso o chamador volta a ler por posição.     */
+function mapaColunas(rows, colunaChave){
+  if(!rows.length) return null;
+  const head=rows[0].map(c=>String(c||'').trim().toLowerCase());
+  if(head.indexOf(colunaChave)<0) return null;
+  const map={};
+  head.forEach((nome,i)=>{ if(nome && !(nome in map)) map[nome]=i; });
+  return map;
+}
+/* Valor de uma célula pelo nome da coluna. */
+function celula(row, map, nome, posFallback){
+  const i = map ? map[nome] : posFallback;
+  return (i==null || i<0) ? '' : String(row[i]==null?'':row[i]).trim();
+}
+/* Monta o objeto multilíngue de um campo: base em português (coluna sem
+   sufixo) + uma entrada por coluna "<campo>_<idioma>" preenchida.      */
+function campoI18n(row, map, base, posFallback){
+  const obj={ pt: celula(row,map,base,posFallback) };
+  if(map){
+    LANGS.forEach(l=>{
+      if(l.code==='pt') return;
+      const v=celula(row,map,base+'_'+l.code,-1);
+      if(v) obj[l.code]=v;
+    });
+  }
+  return obj;
+}
+
+async function carregarEscoposExternos(){
+  const txt=await fetchTextoPrimeiroOk([urlSheetCSV(CONFIG.SHEET_ESCOPOS_ABA), CONFIG.ESCOPOS_CSV_URL]);
+  if(!txt) return;                                   // mantém fallback embutido
+  // colunas: nome | tipo | blocos (+ nome_en, nome_es, … opcionais)
+  const rows=parseCSV(txt);
+  const map=mapaColunas(rows,'nome');
+  const out=[];
+  rows.forEach((c,i)=>{
+    if(map && i===0) return;                          // pula cabeçalho
+    if(/^nome$/i.test((c[0]||'').trim())) return;     // cabeçalho repetido
+    const nome=celula(c,map,'nome',0); if(!nome) return;
+    out.push({nome,                                   // chave — nunca traduzida
+              nome_i18n:campoI18n(c,map,'nome',0),    // só para exibição
+              tipo:(celula(c,map,'tipo',1)||'produto').toLowerCase()==='servico'?'servico':'produto',
+              blocos:celula(c,map,'blocos',2).split(',').map(x=>x.trim()).filter(Boolean)});
+  });
+  if(out.length) ESCOPOS=out;
+}
+
+async function carregarPerguntasExternas(){
+  const txt=await fetchTextoPrimeiroOk([urlSheetCSV(CONFIG.SHEET_PERGUNTAS_ABA), CONFIG.PERGUNTAS_CSV_URL]);
+  if(!txt) return;                                   // mantém fallback embutido
+  // colunas: bloco_id | categoria | grupo | bloco_nota | escopo | codigo | texto
+  //          (+ categoria_en, texto_en, categoria_es, texto_es, … opcionais)
+  const rows=parseCSV(txt);
+  const map=mapaColunas(rows,'bloco_id');
+  const mapa={}; const ordem=[];
+  rows.forEach((c,i)=>{
+    if(map && i===0) return;                                // pula cabeçalho
+    if(/^bloco_id$/i.test((c[0]||'').trim())) return;        // cabeçalho repetido
+    const id=celula(c,map,'bloco_id',0); if(!id) return;
+    const cod=celula(c,map,'codigo',5), texto=celula(c,map,'texto',6);
+    if(!cod && !texto) return;                               // ignora linhas sem pergunta
+    if(!mapa[id]){
+      mapa[id]={id,
+                categoria:celula(c,map,'categoria',1),
+                categoria_i18n:campoI18n(c,map,'categoria',1),
+                grupo:celula(c,map,'grupo',2)||'ESCOPO',
+                bloco_nota:celula(c,map,'bloco_nota',3)||'TECNICA',
+                escopo:celula(c,map,'escopo',4),
+                perguntas:[]};
+      ordem.push(id);
+    }
+    mapa[id].perguntas.push({c:cod, t:texto, t_i18n:campoI18n(c,map,'texto',6)});
+  });
+  const arr=ordem.map(id=>mapa[id]);
+  if(arr.length){BANCO_PERGUNTAS.length=0;arr.forEach(b=>BANCO_PERGUNTAS.push(b));}
+}
+
+/* ----- Textos de orientação (aba "Textos" da planilha) -------------
+   Permite editar, sem commit, os blocos de texto das seções:
+   "Como Responder", "Pasta de Evidências" e "Aviso LGPD".
+   Estrutura da aba:
+     chave          | conteudo        | conteudo_en | conteudo_es | …
+     como_responder | (texto do bloco)| …           | …
+     evidencias     | (texto do bloco)| …           | …
+     lgpd           | (texto do bloco)| …           | …
+     ciencia        | (texto do bloco)| …           | …
+   A coluna "conteudo" é o português; cada idioma tem a sua conteudo_XX.
+   Coluna vazia ou ausente cai no inglês e, na falta dele, no português.
+   Se nem a linha existir, vale o texto embutido em i18n.js.
+   No conteúdo aceita um mini-Markdown:
+     **negrito**            -> negrito
+     linhas iniciadas por "- " ou "* "  -> itens de lista
+     linha em branco        -> novo parágrafo
+   (Na célula do Google Sheets, use Alt+Enter para quebrar linha.)      */
+const TEXTOS_MAP = {                  // chave da planilha -> id do elemento na página
+  como_responder: 'txtComoResponder',
+  evidencias:     'txtEvidencias',
+  lgpd:           'txtLGPD',
+  ciencia:        'txtCiencia'
+};
+
+/* Converte mini-Markdown em HTML seguro (escapa antes de formatar). */
+function miniMarkdown(txt){
+  const linhas=String(txt||'').replace(/\r/g,'').split('\n');
+  const html=[]; let emLista=false;
+  const fechaLista=()=>{ if(emLista){html.push('</ul>');emLista=false;} };
+  const inline=s=>esc(s).replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  linhas.forEach(l=>{
+    const ln=l.trim();
+    if(!ln){ fechaLista(); return; }                 // linha vazia separa blocos
+    if(/^[-*]\s+/.test(ln)){
+      if(!emLista){html.push('<ul>');emLista=true;}
+      html.push('<li>'+inline(ln.replace(/^[-*]\s+/,''))+'</li>');
+    }else{
+      fechaLista();
+      html.push('<p>'+inline(ln)+'</p>');
+    }
+  });
+  fechaLista();
+  return html.join('');
+}
+
+async function carregarTextosExternos(){
+  const txt=await fetchTextoPrimeiroOk([urlSheetCSV(CONFIG.SHEET_TEXTOS_ABA)]);
+  if(!txt) return;                                  // mantém os textos de i18n.js
+  const rows=parseCSV(txt);
+  const map=mapaColunas(rows,'chave');
+  const alvo=APP_LANG;                              // idioma no momento da carga
+  rows.forEach((c,i)=>{
+    if(map && i===0) return;                         // pula cabeçalho
+    const chave=celula(c,map,'chave',0).toLowerCase();
+    if(!chave || chave==='chave') return;
+    const id=TEXTOS_MAP[chave]; if(!id) return;
+    const conteudo=tField(campoI18n(c,map,'conteudo',1), alvo);
+    if(!conteudo) return;                            // sem tradução: fica o texto embutido
+    // O idioma pode ter mudado enquanto o fetch estava em voo.
+    if(alvo!==APP_LANG) return;
+    const el=document.getElementById(id); if(el) el.innerHTML=miniMarkdown(conteudo);
+  });
+}
+
+function carregarLogo(){
+  if(window.LOGO_B64||!CONFIG.LOGO_URL) return;
+  const img=new Image(); img.crossOrigin='anonymous';
+  img.onload=function(){try{const cv=document.createElement('canvas');cv.width=img.naturalWidth;cv.height=img.naturalHeight;cv.getContext('2d').drawImage(img,0,0);window.LOGO_B64=cv.toDataURL('image/png');}catch(e){}};
+  img.src=CONFIG.LOGO_URL;
+}
+
+/* ================================================================
+   LGPD / CERTIFICAÇÃO
+   ================================================================ */
+function toggleLGPD(){
+  const ok=document.getElementById('lgpdCheck').checked;
+  document.getElementById('conteudo').classList.toggle('locked',!ok);
+  document.getElementById('lgpdBox').classList.toggle('ok',ok);
+}
+function toggleCert(){
+  const sim=document.getElementById('cert_sim').checked;
+  document.getElementById('certUploadWrap').style.display=sim?'block':'none';
+  if(sim){
+    autoFillSGQ();
+  }else{
+    arquivoCert=null; renderCertUpload();
+    if(sgqAutoFilled) resetSGQAutoFill();
+  }
+  atualizar();
+}
+
+/* Preenche todas as perguntas SGQ como Conforme ao selecionar "Sim" no certificado. */
+function autoFillSGQ(){
+  BANCO_PERGUNTAS.filter(b=>b.grupo==='SGQ').forEach(b=>
+    b.perguntas.forEach(p=>{
+      const id=qid(b.id,p.c);
+      respostas[id]={status:'Conforme', comentario:(respostas[id]||{}).comentario||''};
+    })
+  );
+  sgqAutoFilled=true;
+  renderPerguntas();
+}
+
+/* Remove o auto-preenchimento SGQ ao mudar para "Não". */
+function resetSGQAutoFill(){
+  BANCO_PERGUNTAS.filter(b=>b.grupo==='SGQ').forEach(b=>
+    b.perguntas.forEach(p=>{ delete respostas[qid(b.id,p.c)]; })
+  );
+  sgqAutoFilled=false;
+  renderPerguntas();
+}
+
+/* ================================================================
+   UPLOADS (componente reutilizável) + COMPRESSÃO/VALIDAÇÃO
+   ================================================================ */
+function fmtMB(bytes){return (bytes/1048576).toFixed(2).replace('.',',')+' MB';}
+
+/* Recomprime imagens grandes (jpeg/png) para reduzir o payload.
+   Arquivos não-imagem (pdf, docx, xlsx...) passam intactos. */
+function prepararArquivo(file){
+  return new Promise(resolve=>{
+    if(!file){resolve(null);return;}
+    if(!/^image\/(jpeg|png|webp)$/i.test(file.type)){resolve(file);return;}
+    const img=new Image(); const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      let {width:w,height:h}=img; const max=CONFIG.IMG_MAX_PX;
+      if(w>max||h>max){const s=Math.min(max/w,max/h);w=Math.round(w*s);h=Math.round(h*s);}
+      const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+      cv.getContext('2d').drawImage(img,0,0,w,h);
+      cv.toBlob(blob=>{
+        if(!blob||blob.size>=file.size){resolve(file);return;} // se não ajudou, mantém original
+        const nome=file.name.replace(/\.(png|webp)$/i,'.jpg');
+        resolve(new File([blob],nome,{type:'image/jpeg'}));
+      },'image/jpeg',CONFIG.IMG_QUALITY);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);resolve(file);};
+    img.src=url;
+  });
+}
+
+/* Processa um arquivo escolhido: comprime, valida tamanho e devolve. */
+async function processarEscolha(rawFile){
+  if(!rawFile) return null;
+  const f=await prepararArquivo(rawFile);
+  if(f.size>CONFIG.MAX_FILE_MB*1048576){
+    showToast(t('toast.fileBig',{name:f.name,size:fmtMB(f.size),max:CONFIG.MAX_FILE_MB}),'error');
+  }
+  return f;
+}
+
+function fileWidget(containerId, accept, getFile, onPick, onClear){
+  const cont=document.getElementById(containerId); if(!cont) return;
+  const f=getFile();
+  cont.innerHTML =
+    '<div class="file-row">'
+    + '<label class="file-btn"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+    + esc(t(f?'file.change':'file.pick'))
+    + '<input type="file" accept="'+accept+'" style="display:none" onchange="'+onPick+'(this)"></label>'
+    + (f
+        ? '<span class="file-name"><span class="ok-dot"></span>'+esc(f.name)+' · '+fmtMB(f.size)+'<span class="x" onclick="'+onClear+'()">×</span></span>'
+        : '<span class="file-name empty">'+esc(t('file.none'))+'</span>')
+    + '</div>';
+}
+function renderCNPJUpload(){fileWidget('cnpjUpload',ACCEPT_CNPJ,()=>arquivoCNPJ,'pickCNPJ','clearCNPJ');}
+function renderCertUpload(){fileWidget('certUpload',ACCEPT_CERT,()=>arquivoCert,'pickCert','clearCert');}
+async function pickCNPJ(i){arquivoCNPJ=await processarEscolha(i.files[0]);renderCNPJUpload();atualizar();}
+function clearCNPJ(){arquivoCNPJ=null;renderCNPJUpload();atualizar();}
+async function pickCert(i){arquivoCert=await processarEscolha(i.files[0]);renderCertUpload();atualizar();}
+function clearCert(){arquivoCert=null;renderCertUpload();atualizar();}
+
+/* ================================================================
+   ESCOPOS
+   ================================================================ */
+function renderEscopos(){
+  const grid=document.getElementById('escopoGrid');
+  const descP=document.getElementById('escopoDescP');
+  const countEl=document.getElementById('escCount');
+
+  if(!escoposBloqueadosURL){
+    // Link sem escopo pré-definido — impede seleção manual pelo fornecedor
+    grid.innerHTML='<div class="q-warn show" style="margin:4px 0 0">'+esc(t('scope.warn'))+'</div>';
+    if(descP) descP.textContent='';
+    if(countEl) countEl.textContent='—';
+    return;
+  }
+
+  // Escopo vindo do link — exibe chips bloqueados (somente leitura).
+  // e.nome é a chave (português); o rótulo exibido vem de nome_i18n.
+  grid.innerHTML=ESCOPOS.map((e,i)=>{
+    const sel=escoposSel.includes(e.nome);
+    return '<label class="escopo-chip'+(sel?' sel':'')+' bloqueado" id="chip_'+i+'">'
+      +'<input type="checkbox" '+(sel?'checked':'')+' disabled>'
+      +'<span class="esc-name">'+esc(tf(e.nome_i18n||e.nome))+'</span>'
+      +'<span class="esc-tag '+e.tipo+'">'+esc(t('scope.tag.'+e.tipo))+'</span></label>';
+  }).join('');
+  if(descP) descP.textContent=t('scope.desc');
+  if(countEl) countEl.textContent=t('scope.count',{n:escoposSel.length});
+}
+function toggleEscopo(i,checked){
+  const nome=ESCOPOS[i].nome;
+  if(checked){if(!escoposSel.includes(nome))escoposSel.push(nome);}
+  else{escoposSel=escoposSel.filter(x=>x!==nome);}
+  document.getElementById('chip_'+i).classList.toggle('sel',checked);
+  document.getElementById('escCount').textContent=t('scope.count',{n:escoposSel.length});
+  renderPerguntas(); atualizar();
+}
+
+/* ----- determina os blocos visíveis conforme regras ----- */
+function blocosVisiveis(){
+  const temProduto=escoposSel.some(n=>{const e=ESCOPOS.find(x=>x.nome===n);return e&&e.tipo==='produto';});
+  return BANCO_PERGUNTAS.filter(b=>{
+    if(b.grupo==='SGQ')          return true;
+    if(b.grupo==='PRODUCAO_GERAL') return temProduto;
+    // Se b.escopo bate direto com o nome selecionado, usa; senão cai no fallback
+    if(b.escopo && escoposSel.includes(b.escopo)) return true;
+    return escoposSel.some(n=>{const e=ESCOPOS.find(x=>x.nome===n);return e&&e.blocos&&e.blocos.includes(b.id);});
+  });
+}
+
+/* ================================================================
+   RENDER DO QUESTIONÁRIO
+   ================================================================ */
+function renderPerguntas(){
+  const cont=document.getElementById('questionario');
+  const blocos=blocosVisiveis();
+  if(!blocos.length){
+    cont.innerHTML='<div class="card"><div class="card-body"><div class="empty-state">'+esc(t('q.empty'))+'</div></div></div>';
+    return;
+  }
+  let html=''; let sgqBannerShown=false;
+  blocos.forEach(b=>{
+    const tag = b.bloco_nota==='SGQ'
+      ? '<span class="bloco-tag sgq">'+esc(t('tag.SGQ'))+'</span>'
+      : '<span class="bloco-tag tec">'+esc(t('tag.TECNICA'))+'</span>';
+    let sub='';
+    if(b.bloco_nota==='SGQ' && sgqAutoFilled && !sgqBannerShown){
+      sub='<div class="q-warn ok show" style="margin-bottom:14px">'+t('q.banner.autofill')+'</div>';
+      sgqBannerShown=true;
+    }
+    if(b.grupo==='PRODUCAO_GERAL')
+      sub+='<div class="bloco-sub">'+esc(t('q.sub.prodgeral'))+'</div>';
+    html+='<div class="card"><div class="card-head">'
+      +'<svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>'
+      +'<h2>'+esc(b.id+' — '+tf(b.categoria_i18n||b.categoria))+'</h2>'+tag+'</div><div class="card-body">'+sub;
+    b.perguntas.forEach(p=>{html+=renderQ(b,p);});
+    html+='</div></div>';
+  });
+  cont.innerHTML=html;
+  // restaura estado visual (status/comentário) e badges
+  blocos.forEach(b=>b.perguntas.forEach(p=>atualizarQ(qid(b.id,p.c))));
+}
+
+function renderQ(b,p){
+  const id=qid(b.id,p.c);
+  const r=respostas[id]||{};
+  const name='st_'+id;
+  const pill=(cls,val,lbl)=>{
+    const rid=name+'_'+val.replace(/[^a-zA-Z]/g,'');
+    return '<input type="radio" class="st-radio '+cls+'" name="'+name+'" id="'+rid+'" value="'+val+'" '
+      +(r.status===val?'checked':'')+' onchange="setStatus(\''+id+'\',\''+val+'\')">'
+      +'<label class="st-label" for="'+rid+'">'+lbl+'</label>';
+  };
+  // O value do radio fica SEMPRE em português — é o que vai no payload
+  // do Make; só o rótulo visível é traduzido.
+  return '<div class="q-block" id="blk_'+id+'">'
+    +'<div class="q-top"><span class="q-code">'+esc(p.c)+'</span>'
+    +'<span class="q-text">'+esc(tf(p.t_i18n||p.t))+'</span>'
+    +'<span class="q-score" id="score_'+id+'">—</span></div>'
+    +'<div class="status-pills">'
+      +pill('st-conf','Conforme',       esc(t('st.Conforme')))
+      +pill('st-reg', 'Regular',        esc(t('st.Regular')))
+      +pill('st-nc',  'Não Conforme',   esc(t('st.Não Conforme')))
+      +pill('st-na',  'Não Aplicável',  esc(t('st.Não Aplicável')))
+    +'</div>'
+    +'<div class="q-com"><textarea placeholder="'+esc(t('q.ph.comment'))+'" oninput="setCom(\''+id+'\',this.value)">'+esc(r.comentario||'')+'</textarea></div>'
+    +'<div class="q-warn" id="warn_'+id+'"></div>'
+    +'</div>';
+}
+
+function ensure(id){if(!respostas[id])respostas[id]={status:'',comentario:''};return respostas[id];}
+function setStatus(id,v){ensure(id).status=v;atualizarQ(id);atualizar();}
+function setCom(id,v){ensure(id).comentario=v;atualizarQ(id);atualizar();}
+
+/* avaliação efetiva de uma pergunta (aplica regra de N/A; "Conforme" vale nota cheia
+   independente de evidência comentada — a conferência da evidência é feita depois,
+   na auditoria, sem alterar a pontuação aqui). */
+function efetivo(id){
+  const r=respostas[id]; if(!r||!r.status) return null;
+  const temComentario=!!(r.comentario&&r.comentario.trim());
+  if(r.status==='Não Aplicável') return {status:'Não Aplicável',pts:null,na:true,pendenteJustificativa:!temComentario};
+  if(r.status==='Conforme') return {status:'Conforme',pts:SCORING.CONFORME,semEvidencia:!temComentario};
+  if(r.status==='Regular') return {status:'Regular',pts:SCORING.REGULAR};
+  return {status:'Não Conforme',pts:SCORING.NC};
+}
+
+function atualizarQ(id){
+  const e=efetivo(id);
+  const r=respostas[id]||{};
+  const score=document.getElementById('score_'+id);
+  const warn=document.getElementById('warn_'+id);
+  const blk=document.getElementById('blk_'+id);
+  if(!score) return;
+  if(!e){score.textContent='—';score.className='q-score';if(warn){warn.classList.remove('show','err');warn.textContent='';}if(blk)blk.className='q-block';return;}
+  if(e.na){
+    score.textContent=t('st.short.na');score.className='q-score na';
+    if(blk) blk.className='q-block na';
+    if(warn){
+      if(e.pendenteJustificativa){warn.textContent=t('q.warn.na');warn.className='q-warn show err';}
+      else{warn.classList.remove('show');warn.textContent='';}
+    }
+    return;
+  }
+  score.textContent=e.pts;
+  // a cor do detalhe segue o status informado pelo fornecedor.
+  score.className='q-score '+(r.status==='Conforme'?'c':r.status==='Regular'?'r':'n');
+  if(warn){ warn.classList.remove('show','err'); warn.textContent=''; }
+  if(blk) blk.className='q-block '+(r.status==='Conforme'?'done':r.status==='Regular'?'reg':'nc');
+}
+
+/* ================================================================
+   CÁLCULO + INDICADORES EM TEMPO REAL
+   ================================================================ */
+/* Certificação de SGQ válida ("Sim") COM o arquivo do certificado anexado */
+function temCertSGQValidoComEvidencia(){
+  const cert=document.querySelector('input[name="certSGQ"]:checked');
+  return !!(cert && cert.value==='Sim' && arquivoCert);
+}
+
+function calcular(){
+  const blocos=blocosVisiveis();
+  let sgq=[],tec=[],total=0,respondidas=0;
+  blocos.forEach(b=>b.perguntas.forEach(p=>{
+    total++; const id=qid(b.id,p.c); const e=efetivo(id);
+    if(e){
+      respondidas++;
+      if(!e.na)(b.bloco_nota==='SGQ'?sgq:tec).push(e.pts);
+    }
+  }));
+  const media=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+  const nSGQ=media(sgq);
+  const nTec=media(tec);
+  let nFinal=null;
+  if(nSGQ!=null&&nTec!=null) nFinal=SCORING.PESO_SGQ*nSGQ+SCORING.PESO_TECNICA*nTec;
+  else if(nSGQ!=null) nFinal=nSGQ; else if(nTec!=null) nFinal=nTec;
+  // certificação de SGQ válida com evidência garante nota mínima de aprovação sem ressalvas,
+  // independentemente das demais respostas.
+  let certOverride=false;
+  if(nFinal!=null && temCertSGQValidoComEvidencia() && nFinal<SCORING.PISO_CERT_SGQ){
+    nFinal=SCORING.PISO_CERT_SGQ; certOverride=true;
+  }
+  return {nSGQ,nTec,nFinal,total,respondidas,pct:total?respondidas/total*100:0,certOverride};
+}
+
+function atualizar(){
+  const r=calcular();
+  // faixa fixa (tempo real)
+  const strip=document.getElementById('rtStrip');
+  strip.classList.toggle('on', r.total>0);
+  const sc = r.nFinal==null?0:r.nFinal;
+  const f=faixaDe(sc);
+  const fill=document.getElementById('rtFill');
+  fill.style.width=sc+'%'; fill.style.background=f.cor;
+  document.getElementById('rtNum').textContent=r.nFinal==null?'—':Math.round(sc)+'%';
+  const cls=document.getElementById('rtCls');
+  cls.textContent=r.nFinal==null?'—':t(f.key);
+  cls.style.background=r.nFinal==null?'var(--surface2)':f.bg;
+  cls.style.color=r.nFinal==null?'var(--muted)':f.cor;
+  document.getElementById('rtProg').textContent=t('rt.answered',{a:r.respondidas,b:r.total});
+
+  // card consolidado
+  document.getElementById('resSGQ').textContent=fmtNota(r.nSGQ);
+  document.getElementById('resTec').textContent=fmtNota(r.nTec);
+  document.getElementById('resFinal').textContent=fmtNota(r.nFinal);
+  const rc=document.getElementById('resClass'), rct=document.getElementById('resClassTxt');
+  if(r.nFinal==null){
+    rc.style.background='var(--surface2)';rc.style.color='var(--muted)';rc.style.borderColor='var(--border)';
+    rc.querySelector('.dot').style.background='var(--muted)';
+    rct.textContent=t('res.waiting',{a:r.respondidas,b:r.total});
+  }else{
+    rc.style.background=f.bg;rc.style.color=f.cor;rc.style.borderColor=f.cor;
+    rc.querySelector('.dot').style.background=f.cor;
+    rct.textContent=t('res.done',{label:t(f.key),a:r.respondidas,b:r.total})
+      +(r.certOverride?t('res.certNote'):'');
+  }
+
+  // info de anexos (quantidade + tamanho total)
+  const ininfo=document.getElementById('anexosInfo');
+  if(ininfo){
+    const lista=listarArquivos(); let tot=0; lista.forEach(a=>tot+=a.file.size);
+    ininfo.textContent = lista.length===0 ? '' : t('attach.info',{n:lista.length,size:fmtMB(tot)});
+  }
+}
+
+/* Lista os arquivos anexados até agora (Cartão CNPJ + Certificado SGQ).
+   O Relatório PDF é gerado e somado a esta lista apenas no momento do envio. */
+function listarArquivos(){
+  const arr=[];
+  if(arquivoCNPJ) arr.push({campo:'Cartão CNPJ', file:arquivoCNPJ});
+  if(arquivoCert) arr.push({campo:'Certificado SGQ', file:arquivoCert});
+  return arr;
+}
+
+/* ================================================================
+   VALIDAÇÃO + COLETA
+   ================================================================ */
+function val(id){return (document.getElementById(id).value||'').trim();}
+function validar(){
+  const erros=[];
+  const br=paisEhLocal();
+  if(!document.getElementById('lgpdCheck').checked) erros.push(t('err.privacy'));
+  if(!document.getElementById('cienciaEvidCheck').checked) erros.push(t('err.aware'));
+  [['razaoSocial','f.legalName'],['nomeFantasia','f.tradeName'],['pais','f.country'],
+   ['cnpj',br?'f.taxid.br':'f.taxid'],['endereco','f.address'],['cidade','f.city'],
+   ['estado',br?'f.state.br':'f.state'],['responsavel','f.contact'],['cargo','f.role'],
+   ['email','f.email'],['telefone','f.phone']].forEach(([id,chave])=>{if(!val(id))erros.push(t(chave));});
+  if(!arquivoCNPJ) erros.push(t(br?'f.taxdoc.br':'f.taxdoc'));
+  const cert=document.querySelector('input[name="certSGQ"]:checked');
+  if(!cert) erros.push(t('err.cert'));
+  else if(cert.value==='Sim'&&!arquivoCert) erros.push(t('err.certFile'));
+  if(!escoposSel.length) erros.push(t('err.scope'));
+  // todas as perguntas visíveis respondidas + justificativa obrigatória em "Não Aplicável"
+  const blocos=blocosVisiveis(); let pend=0, pendNA=0;
+  blocos.forEach(b=>b.perguntas.forEach(p=>{
+    const e=efetivo(qid(b.id,p.c));
+    if(!e) pend++;
+    else if(e.na && e.pendenteJustificativa) pendNA++;
+  }));
+  if(pend>0) erros.push(t('err.pend',{n:pend}));
+  if(pendNA>0) erros.push(t('err.pendNA',{n:pendNA}));
+  return erros;
+}
+
+/* Endereço que segue no payload. O país NÃO é um campo novo: ele é
+   anexado ao fim do endereço (sempre com o nome em inglês, para o Monday
+   ficar consistente). Fornecedor brasileiro mantém o endereço como sempre
+   foi, sem sufixo. Ver a nota sobre o país em aplicarPais().            */
+function enderecoPayload(){
+  const end=val('endereco');
+  if(paisEhLocal()) return end;
+  const nome=countryName(paisSel,'en');
+  return nome ? (end+' — '+nome) : end;
+}
+
+/* ATENÇÃO: a estrutura devolvida aqui é o contrato com o Make/Monday.
+   Nenhuma chave pode ser criada, removida ou renomeada sem ajustar o
+   cenário do Make. Textos (status, classificação, escopos, perguntas)
+   vão sempre em PORTUGUÊS, independentemente do idioma da tela.        */
+function coletar(){
+  const r=calcular();
+  const f=faixaDe(r.nFinal==null?0:r.nFinal);
+  const cert=document.querySelector('input[name="certSGQ"]:checked');
+  const blocos=blocosVisiveis();
+  const respList=[];
+  blocos.forEach(b=>b.perguntas.forEach(p=>{
+    const id=qid(b.id,p.c), st=respostas[id]||{}, e=efetivo(id);
+    respList.push({bloco:b.id+' - '+b.categoria, bloco_nota:b.bloco_nota, codigo:p.c, texto:p.t,
+      status_informado:st.status||'', status_efetivo:e?e.status:'', pontuacao:e?e.pts:null,
+      sem_evidencia_comentada:e?!!e.semEvidencia:false, tem_comentario:!!(st.comentario&&st.comentario.trim()), comentario:st.comentario||''});
+  }));
+  return {
+    rastreabilidade: rastreabilidade,
+    documento_ref:CONFIG.DOC_REF,
+    data_hora:dataHoraPreenchimento,
+    link_pasta_evidencias:linkPastaEvidencias,
+    fornecedor:{
+      razao_social:val('razaoSocial'), nome_fantasia:val('nomeFantasia'), cnpj:val('cnpj'),
+      cnae:"", // preenchido posteriormente a partir do Cartão CNPJ (cenário Make)
+      endereco:enderecoPayload(), cidade:val('cidade'), estado:val('estado'),
+      responsavel:val('responsavel'), cargo:val('cargo'), email:val('email'), telefone:val('telefone')
+    },
+    certificacao_sgq:{ possui: cert?cert.value:'' },
+    escopos:escoposSel.slice(),
+    resultados:{ nota_sgq:r.nSGQ, nota_tecnica:r.nTec, nota_final:r.nFinal==null?null:Math.round(r.nFinal*100)/100, classificacao:f.label, aprovacao_garantida_por_certificacao_sgq:!!r.certOverride },
+    respostas:respList
+  };
+}
+
+/* Linhas do questionário para o PDF, num par de idiomas.
+   Independente de coletar(): o PDF precisa das traduções, o payload não.
+   Devolve [{bloco:{a,b}, linhas:[{codigo,texto:{a,b},status:{a,b},pts,comentario}]}] */
+function linhasParaPDF(langA, langB){
+  const grupos=[];
+  blocosVisiveis().forEach(b=>{
+    const cat=b.categoria_i18n||b.categoria;
+    const g={bloco:{a:b.id+' — '+tField(cat,langA),
+                    b:langB?(b.id+' — '+tField(cat,langB)):''},
+             linhas:[]};
+    b.perguntas.forEach(p=>{
+      const id=qid(b.id,p.c), st=respostas[id]||{}, e=efetivo(id);
+      const stKey=e?e.status:'';                       // chave em português
+      g.linhas.push({
+        codigo:p.c,
+        stKey:stKey,                                   // usada só para colorir
+        texto:{a:tField(p.t_i18n||p.t,langA), b:langB?tField(p.t_i18n||p.t,langB):''},
+        status:{a:stKey?T(langA,'st.'+stKey):'', b:(langB&&stKey)?T(langB,'st.'+stKey):''},
+        semEvidencia:e?!!e.semEvidencia:false,
+        pts:e?e.pts:null,
+        na:!!(e&&e.na),
+        comentario:st.comentario||''
+      });
+    });
+    grupos.push(g);
+  });
+  return grupos;
+}
+
+/* ================================================================
+   ENVIO — UM ÚNICO POST multipart ao webhook do Make, com os 3
+   arquivos em binário (Cartão CNPJ, Certificado SGQ, Relatório PDF)
+   + os dados em JSON. Sem serviço externo de armazenamento.
+   O payload total é checado contra CONFIG.MAX_PAYLOAD_MB antes do envio.
+   ================================================================ */
+
+async function enviar(){
+  const erros=validar();
+  if(erros.length){
+    showToast(t('toast.pending')+'\n• '+erros.slice(0,6).join('\n• ')+(erros.length>6?'\n  '+t('toast.more',{n:erros.length-6}):''),'error');
+    return;
+  }
+  const btn=document.getElementById('btnEnviar'); btn.disabled=true; btn.textContent=t('btn.pdfing');
+
+  try{
+    // 1) Duas versões do MESMO relatório:
+    //    a) a que o fornecedor baixa — no idioma dele;
+    //    b) a que segue ao Make/Monday — bilíngue português + inglês,
+    //       para que a equipe Perpec sempre leia o relatório em português.
+    await gerarPDF({primary:pdfLangOf(APP_LANG), download:true});
+    const pdfBlob=await gerarPDF({primary:'pt', secondary:'en', returnBlob:true});
+    const pdfFile=new File([pdfBlob],'Autoavaliacao-'+rastreabilidade+'.pdf',{type:'application/pdf'});
+
+    // 2) Os 3 únicos arquivos do envio
+    const arquivos=listarArquivos();
+    arquivos.push({campo:'Relatório PDF', file:pdfFile});
+
+    // 3) Checagem do limite de payload (dados + 3 arquivos)
+    const dados=coletar();
+    const dadosStr=JSON.stringify(dados);
+    let totalBytes=dadosStr.length; arquivos.forEach(a=>totalBytes+=a.file.size);
+    const limiteBytes=CONFIG.MAX_PAYLOAD_MB*1048576;
+    if(totalBytes>limiteBytes){
+      showToast(t('toast.payload',{size:fmtMB(totalBytes),max:CONFIG.MAX_PAYLOAD_MB}),'error');
+      return;
+    }
+
+    // 4) UM único POST multipart ao Make, com dados + binários dos 3 arquivos
+    btn.textContent=t('btn.sending');
+    const fd=new FormData();
+    fd.append('rastreabilidade', dados.rastreabilidade);
+    fd.append('link_pasta_evidencias', linkPastaEvidencias);
+    fd.append('dados', dadosStr);
+    fd.append('cartao_cnpj', arquivoCNPJ, arquivoCNPJ.name);
+    if(arquivoCert) fd.append('certificado_sgq', arquivoCert, arquivoCert.name);
+    fd.append('relatorio_pdf', pdfFile, pdfFile.name);
+
+    let okWebhook=true;
+    if(CONFIG.WEBHOOK_URL){
+      try{ await fetch(CONFIG.WEBHOOK_URL,{method:'POST',mode:'no-cors',body:fd}); }
+      catch(e){ okWebhook=false; console.error('Falha webhook:',e); }
+    }else{
+      okWebhook=false;
+    }
+
+    // 5) Resumo honesto
+    if(!CONFIG.WEBHOOK_URL){
+      showToast(t('toast.noHook'),'error');
+    }else if(!okWebhook){
+      showToast(t('toast.failHook'),'error');
+    }else{
+      showToast(t('toast.ok',{n:arquivos.length,size:fmtMB(totalBytes)}),'success');
+    }
+  }catch(e){
+    console.error('Erro no envio:',e);
+    showToast(t('toast.error',{msg:(e.message||e)}),'error');
+  }finally{
+    btn.disabled=false; btn.textContent=t('btn.send');
+  }
+}
+
+/* ================================================================
+   RELATÓRIO PDF — um único gerador, usado em dois modos:
+
+     • PDF do fornecedor  → monolíngue, no idioma que ele escolheu
+         gerarPDF({primary:pdfLangOf(APP_LANG), download:true})
+     • PDF enviado ao Make → bilíngue, português + inglês
+         gerarPDF({primary:'pt', secondary:'en', returnBlob:true})
+
+   No modo bilíngue o 2º idioma aparece logo abaixo do 1º, menor e em
+   itálico cinza. Nas tabelas isso é feito reservando altura extra na
+   célula (didParseCell) e desenhando a 2ª língua à mão (didDrawCell),
+   porque o autoTable não estiliza linhas individuais de uma célula.
+
+   Não incorpora anexos — apenas perguntas, respostas, comentários
+   e resultados.
+   ================================================================ */
+async function gerarPDF(opts){
+  opts=opts||{};
+  const A  = opts.primary || pdfLangOf(APP_LANG);   // idioma principal
+  const B  = opts.secondary || null;                // 2º idioma (null = monolíngue)
+  const bi = !!B;
+
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
+  const W=210,H=297,ML=10,MR=10,CW=W-ML-MR;
+  const DARK=[26,18,16],GRAY=[135,130,125],RED=[192,57,43],LGRAY=[224,219,213];
+  const SF=doc.internal.scaleFactor;
+  const d=coletar();
+  const grupos=linhasParaPDF(A,B);
+  const f=faixaDe(d.resultados.nota_final==null?0:d.resultados.nota_final);
+  const logoB64=window.LOGO_B64||'';
+  const setC=c=>doc.setTextColor(...c), setF=c=>doc.setFillColor(...c), setD=c=>doc.setDrawColor(...c);
+  const hexToRgb=hex=>[parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)];
+  const nota=n=>fmtNotaL(n,A);
+
+  // Rótulo de campo bilíngue numa linha só: "Razão Social / Legal Name:"
+  const lb=k=>bi ? (T(A,k).replace(/:\s*$/,'')+' / '+T(B,k)) : T(A,k);
+  // Título de seção bilíngue: "RESULTADO … / ASSESSMENT …"
+  const ti=k=>bi ? (T(A,k)+'  /  '+T(B,k)) : T(A,k);
+  // Cabeçalho de coluna: 2 linhas quando bilíngue
+  const hc=k=>bi ? (T(A,k)+'\n'+T(B,k)) : T(A,k);
+
+  const docname = bi ? (T(A,'pdf.docname')+' / '+T(B,'pdf.docname')) : T(A,'pdf.docname');
+
+  function footer(){const pg=doc.internal.getCurrentPageInfo().pageNumber,tot=doc.internal.getNumberOfPages();
+    doc.setFontSize(6.5);doc.setFont('helvetica','italic');setC([170,165,160]);
+    doc.text('Perpec Oilfield Supply  •  '+CONFIG.DOC_REF+'  •  '+docname,W/2,H-6,{align:'center'});
+    doc.setFont('helvetica','normal');doc.text(T(A,'pdf.page',{a:pg,b:tot}),W-MR,H-6,{align:'right'});}
+  function header(){
+    if(logoB64){try{doc.addImage(logoB64,'PNG',ML,3,38,10);}catch(e){}}
+    setD(RED);doc.setLineWidth(0.8);doc.line(0,18,W,18);
+    doc.setFontSize(13);doc.setFont('helvetica','bold');setC(DARK);
+    doc.text(T(A,'pdf.title'),W-MR,bi?8:9,{align:'right'});
+    if(bi){doc.setFontSize(8);doc.setFont('helvetica','italic');setC(GRAY);doc.text(T(B,'pdf.title'),W-MR,12.2,{align:'right'});}
+    doc.setFontSize(7.5);doc.setFont('helvetica','normal');setC(GRAY);
+    doc.text((d.rastreabilidade||'—')+'  •  '+fmtDataHora(_instantePreenchimento||new Date(),A),W-MR,bi?15.8:15,{align:'right'});
+  }
+  header();
+  let y=24;
+
+  // ---- Identificação do fornecedor ----
+  function bloco(titulo,linhas){
+    doc.setFontSize(8);doc.setFont('helvetica','bold');setC(RED);doc.text(titulo.toUpperCase(),ML,y);y+=2;
+    setD(LGRAY);doc.setLineWidth(0.3);doc.line(ML,y,ML+CW,y);y+=4;
+    doc.setFontSize(9);
+    const LW=bi?60:42;                       // rótulos bilíngues precisam de mais espaço
+    linhas.forEach(([k,v])=>{
+      doc.setFont('helvetica','bold');setC(GRAY);
+      const kt=doc.splitTextToSize(String(k),LW-3);doc.text(kt,ML,y);
+      doc.setFont('helvetica','normal');setC(DARK);
+      const tx=doc.splitTextToSize(String(v||'—'),CW-LW);doc.text(tx,ML+LW,y);
+      y+=Math.max(5,Math.max(tx.length,kt.length)*4.6);
+    });
+    y+=3;
+  }
+  const fo=d.fornecedor;
+  const simNao=v=>{
+    const k = v==='Sim' ? 'cert.yes' : v==='Não' ? 'cert.no' : null;
+    if(!k) return '—';
+    return bi ? (T(A,k)+' / '+T(B,k)) : T(A,k);
+  };
+  // Escopos: a chave é sempre o nome em português; aqui exibimos traduzido.
+  const escTxt=d.escopos.map(n=>{
+    const e=ESCOPOS.find(x=>x.nome===n), src=e?(e.nome_i18n||e.nome):n;
+    return bi ? (tField(src,A)+' / '+tField(src,B)) : tField(src,A);
+  }).join('; ');
+  bloco(ti('pdf.ident'),[
+    [lb('pdf.legalName'),  fo.razao_social],
+    [lb('pdf.tradeName'),  fo.nome_fantasia],
+    [lb('pdf.taxid'),      fo.cnpj],
+    [lb('pdf.address'),    fo.endereco+' — '+fo.cidade+'/'+fo.estado],
+    [lb('pdf.contactPer'), fo.responsavel+'  ('+fo.cargo+')'],
+    [lb('pdf.contact'),    fo.email+'  •  '+fo.telefone],
+    [lb('pdf.cert'),       simNao(d.certificacao_sgq.possui)],
+    [lb('pdf.scopes'),     escTxt],
+    [lb('pdf.evidFolder'), d.link_pasta_evidencias||'—']
+  ]);
+
+  // ---- Resultado consolidado (destaque) ----
+  doc.setFontSize(8);doc.setFont('helvetica','bold');setC(RED);doc.text(ti('pdf.result'),ML,y);y+=3;
+  const th=bi?22:18, bw=(CW-12)/3;
+  const tiles=[['res.sgq',nota(d.resultados.nota_sgq)],['res.tec',nota(d.resultados.nota_tecnica)],['res.final',nota(d.resultados.nota_final)]];
+  tiles.forEach((tl,i)=>{const x=ML+i*(bw+6);const isFinal=i===2;
+    setF(isFinal?DARK:[248,247,245]);setD(LGRAY);doc.setLineWidth(0.3);doc.roundedRect(x,y,bw,th,2,2,'FD');
+    doc.setFontSize(6.5);doc.setFont('helvetica','bold');setC(isFinal?[160,144,144]:GRAY);
+    doc.text(T(A,tl[0]),x+bw/2,y+4.6,{align:'center'});
+    if(bi){doc.setFontSize(5.5);doc.setFont('helvetica','italic');doc.text(T(B,tl[0]),x+bw/2,y+8,{align:'center'});}
+    doc.setFontSize(16);doc.setFont('helvetica','bold');setC(isFinal?[255,255,255]:DARK);
+    doc.text(tl[1],x+bw/2,y+th-3.8,{align:'center'});});
+  y+=th+4;
+
+  const fc = f.rgb || hexToRgb(f.cor);
+  const bh = bi?15:11;
+  setF([fc[0]*0.07+243, fc[1]*0.07+243, fc[2]*0.07+243]);
+  setD(fc);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(ML,y,CW,bh,2,2,'FD');
+  doc.setFontSize(11);doc.setFont('helvetica','bold');setC(fc);
+  doc.text(T(A,'pdf.finalClass')+T(A,f.key),W/2,bi?y+6:y+7,{align:'center'});
+  if(bi){doc.setFontSize(8);doc.setFont('helvetica','italic');doc.text(T(B,'pdf.finalClass')+T(B,f.key),W/2,y+11.6,{align:'center'});}
+  y+=bh+2;
+  if(d.resultados.aprovacao_garantida_por_certificacao_sgq){
+    doc.setFontSize(7);doc.setFont('helvetica','italic');setC(GRAY);
+    doc.text(T(A,'pdf.certFloor',{n:SCORING.PISO_CERT_SGQ}),ML,y);y+=4;
+    if(bi){doc.text(T(B,'pdf.certFloor',{n:SCORING.PISO_CERT_SGQ}),ML,y);y+=4;}
+  }
+  y+=3;
+
+  // ---- Tabelas por bloco ----
+  const C0=11, CQ=88, C2=24, C3=10, C4=CW-C0-CQ-C2-C3;
+  const PAD=1.6, FSA=7, FSB=6;
+  const lhA=FSA*1.15/SF, lhB=FSB*1.15/SF;     // mesma fórmula de altura do autoTable
+
+  grupos.forEach(g=>{
+    const sec={}, meta={};                     // por índice de linha do corpo
+    const body=g.linhas.map((l,i)=>{
+      meta[i]={stKey:l.stKey, pts:l.pts, na:l.na};
+      if(bi) sec[i]={1:l.texto.b, 2:l.status.b};
+      const pts = l.pts==null ? (l.na?T(A,'st.short.na'):'—') : String(l.pts);
+      return [l.codigo, l.texto.a, l.status.a+(l.semEvidencia?' *':''), pts, l.comentario||''];
+    });
+    doc.autoTable({
+      startY:y+2,margin:{left:ML,right:MR,top:22,bottom:14},
+      head:[[ {content:g.bloco.a+(bi?'\n'+g.bloco.b:''),colSpan:5,styles:{halign:'left',fillColor:DARK,textColor:[212,200,196],fontSize:7.5}} ],
+            [hc('pdf.col.code'),hc('pdf.col.q'),hc('pdf.col.status'),hc('pdf.col.pts'),hc('pdf.col.comment')]],
+      body:body,
+      styles:{fontSize:FSA,cellPadding:PAD,lineColor:LGRAY,lineWidth:0.1,valign:'top',overflow:'linebreak'},
+      headStyles:{fillColor:[240,237,232],textColor:GRAY,fontStyle:'bold',fontSize:6.8},
+      columnStyles:{0:{cellWidth:C0,halign:'center'},1:{cellWidth:CQ},2:{cellWidth:C2,halign:'center'},3:{cellWidth:C3,halign:'center',fontStyle:'bold'},4:{cellWidth:C4}},
+      didParseCell:hook=>{
+        if(hook.section!=='body') return;
+        const m=meta[hook.row.index];
+        if(m){
+          if(hook.column.index===2){          // cor pelo status em português, não pelo texto exibido
+            if(m.stKey==='Não Conforme')      hook.cell.styles.textColor=[192,57,43];
+            else if(m.stKey==='Não Aplicável')hook.cell.styles.textColor=[61,90,192];
+            else if(m.stKey==='Conforme')     hook.cell.styles.textColor=[46,125,50];
+            else if(m.stKey==='Regular')      hook.cell.styles.textColor=[183,121,31];
+          }
+          if(hook.column.index===3){
+            if(m.na)            hook.cell.styles.textColor=[61,90,192];
+            else if(m.pts===100)hook.cell.styles.textColor=[46,125,50];
+            else if(m.pts===75) hook.cell.styles.textColor=[183,121,31];
+            else if(m.pts===0)  hook.cell.styles.textColor=[192,57,43];
+          }
+        }
+        // 2ª língua: reserva a altura agora, desenha em didDrawCell
+        const s=sec[hook.row.index];
+        if(bi && s && s[hook.column.index]){
+          const larg=(hook.column.index===1?CQ:C2)-PAD*2;
+          doc.setFont('helvetica','normal');doc.setFontSize(FSA);
+          const la=doc.splitTextToSize(String(hook.cell.raw||''),larg);
+          doc.setFont('helvetica','italic');doc.setFontSize(FSB);
+          const lbn=doc.splitTextToSize(s[hook.column.index],larg);
+          hook.cell.__sec=lbn;
+          hook.cell.styles.minCellHeight=PAD*2+la.length*lhA+lbn.length*lhB+0.4;
+        }
+      },
+      didDrawCell:hook=>{
+        const linhasSec=hook.cell.__sec;
+        if(!linhasSec||hook.section!=='body') return;
+        // ancora logo abaixo da última linha do idioma principal desta célula
+        const nA=(hook.cell.text||[]).length;
+        const yy=hook.cell.y+PAD+nA*lhA+lhB*0.78;
+        doc.setFont('helvetica','italic');doc.setFontSize(FSB);doc.setTextColor(140,135,130);
+        if(hook.column.index===2) doc.text(linhasSec,hook.cell.x+hook.cell.width/2,yy,{align:'center'});
+        else                      doc.text(linhasSec,hook.cell.x+PAD,yy);
+      },
+      didDrawPage:()=>{footer();}
+    });
+    y=doc.lastAutoTable.finalY+3;
+  });
+
+  // legenda — itens "Conforme" sem evidência comentada, pendentes de conferência na auditoria
+  if(y>H-(bi?22:16)){doc.addPage();y=20;}
+  doc.setFontSize(6.5);doc.setFont('helvetica','italic');setC(GRAY);
+  doc.text(T(A,'pdf.legend'),ML,y+3);
+  if(bi) doc.text(T(B,'pdf.legend'),ML,y+6.2);
+
+  // Cabeçalho e rodapé em TODAS as páginas — inclusive as que o autoTable
+  // criou sozinho ao estourar a página (didDrawPage só cobre o rodapé,
+  // porque o cabeçalho já tinha sido desenhado uma vez lá em cima, na
+  // página 1, e ficava faltando nas páginas seguintes).
+  const tot=doc.internal.getNumberOfPages();for(let i=1;i<=tot;i++){doc.setPage(i);header();footer();}
+  const nome='Autoavaliacao-'+rastreabilidade+'.pdf';
+  if(opts.download) doc.save(nome);
+  if(opts.returnBlob) return doc.output('blob');
+}
+
+/* Botão "Baixar PDF": sempre no idioma da tela (ou inglês, se a fonte do
+   PDF não desenhar os caracteres desse idioma — ver pdfLangOf). */
+function baixarPDF(){ return gerarPDF({primary:pdfLangOf(APP_LANG), download:true}); }
+
+/* ================================================================
+   LIMPAR
+   ================================================================ */
+function limpar(){
+  if(!confirm(t('confirm.clear')))return;
+  respostas={}; sgqAutoFilled=false; if(!escoposBloqueadosURL) escoposSel=[]; arquivoCNPJ=null; arquivoCert=null;
+  document.querySelectorAll('#conteudo input[type="text"]:not([readonly]),#conteudo input[type="email"]').forEach(el=>el.value='');
+  document.querySelectorAll('input[name="certSGQ"]').forEach(el=>el.checked=false);
+  const ce=document.getElementById('cienciaEvidCheck'); if(ce){ce.checked=false;document.getElementById('cienciEvidBox').classList.remove('ok');}
+  document.getElementById('certUploadWrap').style.display='none';
+  paisSel=''; const ps=document.getElementById('pais'); if(ps) ps.value=''; aplicarPais();
+  carregarRastreabilidade(); definirDataHora();
+  renderCNPJUpload(); renderCertUpload(); renderEscopos(); renderPerguntas(); atualizar();
+  showToast(t('toast.cleared'));
+}
+</script>
+</body>
+</html>
