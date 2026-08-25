@@ -351,6 +351,19 @@ O **selo de integridade** continua sendo calculado e impresso no PDF, mas deixou
 controle principal: agora quem garante que um registro não foi adulterado é o banco, com
 autoria e auditoria do lado do servidor.
 
+O selo é um código curto (`v2:` seguido de oito caracteres) calculado sobre os campos de
+negócio do registro. Ele só funciona se o mesmo registro der o mesmo código antes de subir e
+depois de voltar do servidor — e o banco não devolve byte a byte o que recebeu. Por isso o
+cálculo normaliza o que o Postgres reescreve: datas viram sempre o mesmo formato ISO, e os
+blocos de confirmação são serializados com as chaves em ordem alfabética, porque o tipo
+`jsonb` não guarda a ordem original. O documento do visitante fica **fora** do selo de
+propósito: a tela nunca recebe o valor completo de volta, então não teria como conferir; quem
+protege esse campo é o banco, que não dá permissão de leitura e registra toda revelação.
+
+Registros gravados por versões anteriores do sistema têm selo em formato antigo. Eles não são
+acusados de adulteração — apenas não são conferíveis, e voltam a ser na próxima gravação
+legítima (o registro da saída, por exemplo).
+
 ### Higiene em aparelho compartilhado
 
 O botão **Sair** apaga a cópia local do aparelho, além de encerrar a sessão. Em celular ou

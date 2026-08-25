@@ -1027,23 +1027,66 @@ function aplicarDoServidor(pacote){
    Selo FNV-1a sobre os campos de negócio. Não é criptografia: serve
    para acusar edição feita direto no localStorage, fora da tela.
    Toda gravação legítima re-sela o registro.
+
+   REGRA DE OURO: o selo só presta se o MESMO registro der o MESMO
+   resultado antes de subir e depois de voltar do servidor. O que o
+   banco devolve não é byte a byte o que foi enviado, então tudo que
+   ele reescreve precisa ser normalizado aqui antes de entrar na conta:
+
+     · timestamptz  — sai '2026-08-25T15:00:00.000Z' e volta
+                      '2026-08-25T15:00:00+00:00'. Mesmo instante,
+                      texto diferente. Normalizado por isoNormal().
+     · jsonb        — o Postgres NÃO guarda a ordem das chaves nem os
+                      espaços. Normalizado por jsonCanonico().
+     · documento    — fora do selo de propósito: a tela nunca recebe o
+                      valor completo de volta (só a máscara), então não
+                      teria como conferir honestamente. Quem protege
+                      esse campo é o banco: sem GRANT de leitura, e
+                      toda revelação passa por RPC auditada.
    ================================================================ */
-const CAMPOS_SELADOS=['numero','pessoa','documento','empresa','veiculo','placa','entrada','saida',
+const SELO_VERSAO='v2';
+const CAMPOS_SELADOS=['numero','pessoa','empresa','veiculo','placa',
                       'setor','autorizador','porteiroEntrada','matriculaEntrada','turnoEntrada',
                       'porteiroSaida','matriculaSaida','turnoSaida','status','observacoes'];
+const CAMPOS_SELADOS_DATA=['entrada','saida'];
+
+/* Data em forma única, independente de quem escreveu o texto. */
+function isoNormal(v){
+  if(v==null||v==='') return '';
+  const d=new Date(v);
+  return isNaN(d) ? String(v) : d.toISOString();
+}
+/* JSON com as chaves em ordem alfabética e sem espaços, para sobreviver
+   à ida e volta pelo jsonb. */
+function jsonCanonico(v){
+  if(v===undefined||v===null||typeof v!=='object') return JSON.stringify(v===undefined?null:v);
+  if(Array.isArray(v)) return '['+v.map(jsonCanonico).join(',')+']';
+  return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort()
+              .map(k=>JSON.stringify(k)+':'+jsonCanonico(v[k])).join(',')+'}';
+}
 
 function selo(r){
   // A auditoria não entra: ela é carregada sob demanda do servidor e o
   // selo precisa dar o mesmo resultado com ou sem ela em memória.
   const base=JSON.stringify(CAMPOS_SELADOS.map(k=>r[k]==null?'':String(r[k])))
-           + JSON.stringify(r.confirmEntrada||null)
-           + JSON.stringify(r.confirmSaida||null);
+           + JSON.stringify(CAMPOS_SELADOS_DATA.map(k=>isoNormal(r[k])))
+           + jsonCanonico(r.confirmEntrada||null)
+           + jsonCanonico(r.confirmSaida||null);
   let h=0x811c9dc5;
   for(let i=0;i<base.length;i++){ h^=base.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
-  return h.toString(16).padStart(8,'0');
+  return SELO_VERSAO+':'+h.toString(16).padStart(8,'0');
 }
 function selar(r){ r.selo=selo(r); return r; }
-function integro(r){ return !r.selo || r.selo===selo(r); }
+function integro(r){
+  // Sem selo, ou selo de uma versão anterior do cálculo: não dá para
+  // conferir, e acusar adulteração sem base seria pior do que calar.
+  // O registro volta a ser conferível na próxima gravação legítima.
+  if(!r.selo || String(r.selo).indexOf(SELO_VERSAO+':')!==0) return true;
+  return r.selo===selo(r);
+}
+/* sync.js re-sela quando o servidor troca o número provisório pelo
+   definitivo — sem isso o registro subiria com o selo do número velho. */
+window.selarRegistro=selar;
 
 /* ================================================================
    3. UTILITÁRIOS
@@ -1120,8 +1163,11 @@ const ROTULO_SIT = { in:'Está dentro', out:'Já saiu' };
 /* ================================================================
    5. TRILHA DE AUDITORIA
    ----------------------------------------------------------------
-   Só cresce: nada é removido ou reescrito pela interface. Entra no
-   cálculo do selo, então apagar um evento na mão quebra a integridade.
+   Só cresce: nada é removido ou reescrito pela interface. Fica fora do
+   cálculo do selo de propósito — a trilha é carregada sob demanda, e um
+   registro precisa dar o mesmo selo com ou sem ela em memória. Quem
+   protege a trilha é o banco: a tabela não tem GRANT de UPDATE nem de
+   DELETE, então nem a tela nem a chave pública conseguem apagar evento.
    ================================================================ */
 function auditar(r,evento,detalhe){
   const ev={
@@ -2743,7 +2789,9 @@ async function gerarDeclaracao(id){
   doc.save('Declaracao-Entrada-'+r.numero+'.pdf');
 
   auditar(r,'PDF GERADO','Declaração de autorização de entrada.');
-  selar(r); dbSalvar();
+  // Não re-sela: gerar PDF não muda nenhum campo do registro. Re-selar
+  // aqui só serviria para "limpar" o selo de um registro adulterado.
+  dbSalvar();
   if(MODAL_ID===id) verRegistro(id); else renderTudo();
   showToast('PDF gerado. Veja a pasta de downloads.','success');
 }

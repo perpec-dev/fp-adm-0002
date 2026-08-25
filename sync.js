@@ -449,6 +449,9 @@ window.PORTARIA = (function(){
         if(!n) throw new Error('network: sem numeração');
         mudouNumero.push({ id:r.id, de:r.numero, para:n });
         r.numero=n; r.provisorio=false;
+        // O número entra no selo. Trocar o provisório pelo definitivo sem
+        // re-selar faria o registro nascer no servidor já "adulterado".
+        if(typeof window.selarRegistro==='function') window.selarRegistro(r);
       }
       const { error } = await sb.from('registros').insert(paraBanco(r));
       if(error) throw error;
