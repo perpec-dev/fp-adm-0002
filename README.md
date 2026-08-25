@@ -148,13 +148,18 @@ Enquanto não houver turno aberto, o formulário de entrada fica travado.
 
 ### 4. Registrar uma entrada
 
-Aba **Nova entrada**, cinco passos numerados:
+Aba **Nova entrada**. O formulário vem **em etapas, uma tela por vez**, com barra de
+progresso no topo e os botões *Voltar* e *Avançar* embaixo:
 
 1. Quem está entrando (nome, empresa, documento)
 2. Carro (placa e, opcionalmente, modelo/cor)
 3. Hora que entrou (botão *Usar a hora de agora*)
 4. Quem autorizou (setor + nome da pessoa)
-5. Anotações livres e confirmação
+5. Fotos (opcional)
+6. Anotações livres e confirmação
+
+Cada etapa é conferida ao avançar: se faltar algo, o campo fica vermelho e o formulário não
+passa. No último passo o botão vira **LIBERAR ENTRADA**.
 
 A confirmação é um botão grande que fica verde. O porteiro **não redigita nada** —
 nome, matrícula e assinatura vêm do turno aberto.
