@@ -2669,24 +2669,26 @@ async function gerarDeclaracao(id){
   let y=26;
 
   // ---- Texto de abertura ----
-  doc.setFontSize(9.5); doc.setFont('helvetica','normal'); setC(DARK);
+  doc.setFontSize(9); doc.setFont('helvetica','normal'); setC(DARK);
   const abertura='A Perpec Oilfield Supply declara, para os devidos fins, que a entrada da pessoa e do veículo '+
     'abaixo identificados nas dependências da unidade foi previamente autorizada pelo setor responsável, '+
     'conforme registro de portaria nº '+r.numero+', e conferida pelo porteiro do turno indicado neste documento.';
   const linhas=doc.splitTextToSize(abertura,CW);
-  doc.text(linhas,ML,y); y+=linhas.length*4.6+5;
+  doc.text(linhas,ML,y); y+=linhas.length*4.2+4;
 
   // ---- Tabelas de dados ----
+  // Compactas de propósito: o corpo inteiro precisa caber na primeira
+  // página junto com as duas conferências assinadas.
   function tabela(titulo,dados){
     doc.autoTable({
       startY:y, margin:{left:ML,right:MR,top:24,bottom:16},
       head:[[{content:titulo,colSpan:2,styles:{halign:'left',fillColor:DARK,textColor:[240,230,228],fontSize:7.5,fontStyle:'bold'}}]],
       body:dados.map(l=>[l[0],l[1]||'—']),
-      styles:{fontSize:9,cellPadding:2.2,lineColor:LGRAY,lineWidth:0.1,valign:'top',overflow:'linebreak'},
-      columnStyles:{0:{cellWidth:52,fontStyle:'bold',textColor:GRAY},1:{cellWidth:CW-52,textColor:DARK}},
+      styles:{fontSize:8.5,cellPadding:1.7,lineColor:LGRAY,lineWidth:0.1,valign:'top',overflow:'linebreak'},
+      columnStyles:{0:{cellWidth:50,fontStyle:'bold',textColor:GRAY},1:{cellWidth:CW-50,textColor:DARK}},
       didDrawPage:()=>{ footer(); }
     });
-    y=doc.lastAutoTable.finalY+4;
+    y=doc.lastAutoTable.finalY+3;
   }
 
   tabela('QUEM ENTROU E COM QUAL VEÍCULO',[
@@ -2715,37 +2717,53 @@ async function gerarDeclaracao(id){
   if(r.observacoes) tabela('ANOTAÇÕES DA PORTARIA',[['Observações', r.observacoes]]);
 
   // ---- Termos confirmados, com a assinatura desenhada ----
+  const ASSIN_L=46, ASSIN_A=14;            // tamanho da assinatura no papel
+
+  /* Altura exata do bloco, para decidir a quebra ANTES de desenhar.
+     Precisa acompanhar termoPDF() passo a passo. */
+  function alturaTermo(c){
+    if(!c) return 0;
+    const img=(DB.assinaturas||{})[c.assinId];
+    const tl=doc.splitTextToSize(c.termo,CW);
+    return 2 + 4.5 + tl.length*3.8 + 2 + (img ? ASSIN_A+4.5 : 6) + 3;
+  }
+
   function termoPDF(titulo,c){
     if(!c) return;
     const img=(DB.assinaturas||{})[c.assinId];
-    const alturaBloco = 20 + (img?20:0);
-    if(y>H-alturaBloco-24){ doc.addPage(); header(); y=26; }
 
     doc.setFontSize(7.5); doc.setFont('helvetica','bold'); setC(RED);
     doc.text(titulo,ML,y); y+=2;
     setD(LGRAY); doc.setLineWidth(0.3); doc.line(ML,y,ML+CW,y); y+=4.5;
 
-    doc.setFontSize(8.5); doc.setFont('helvetica','italic'); setC(DARK);
+    doc.setFontSize(8); doc.setFont('helvetica','italic'); setC(DARK);
     const tl=doc.splitTextToSize(c.termo,CW);
-    doc.text(tl,ML,y); y+=tl.length*4+2;
+    doc.text(tl,ML,y); y+=tl.length*3.8+2;
 
     const quem=c.nome+(c.matricula?'  —  matrícula '+c.matricula:'');
     if(img){
-      try{ doc.addImage(img,'PNG',ML,y,52,15.8); }catch(e){}
-      setD([120,115,110]); doc.setLineWidth(0.3); doc.line(ML,y+16.5,ML+52,y+16.5);
+      try{ doc.addImage(img,'PNG',ML,y,ASSIN_L,ASSIN_A); }catch(e){}
+      setD([120,115,110]); doc.setLineWidth(0.3); doc.line(ML,y+ASSIN_A+0.8,ML+ASSIN_L,y+ASSIN_A+0.8);
       doc.setFontSize(8); doc.setFont('helvetica','bold'); setC(DARK);
-      doc.text(quem,ML+56,y+11);
+      doc.text(quem,ML+ASSIN_L+4,y+9);
       doc.setFontSize(7); doc.setFont('helvetica','normal'); setC(GRAY);
-      doc.text('Confirmado em '+fmtDT(c.ts),ML+56,y+15.5);
-      y+=21;
+      doc.text('Confirmado em '+fmtDT(c.ts),ML+ASSIN_L+4,y+13.2);
+      y+=ASSIN_A+4.5;
     }else{
       doc.setFontSize(8); doc.setFont('helvetica','normal'); setC(GRAY);
       doc.text('Confirmado por '+quem+' em '+fmtDT(c.ts)+'.',ML,y); y+=6;
     }
     y+=3;
   }
-  termoPDF('CONFERÊNCIA NA ENTRADA', r.confirmEntrada);
-  termoPDF('CONFERÊNCIA NA SAÍDA',   r.confirmSaida);
+
+  // As duas conferências são um par: quem lê compara uma com a outra.
+  // Ou cabem juntas onde estamos, ou vão juntas para a página seguinte —
+  // nunca uma em cada folha.
+  const termos=[['CONFERÊNCIA NA ENTRADA',r.confirmEntrada],
+                ['CONFERÊNCIA NA SAÍDA',  r.confirmSaida]].filter(t=>t[1]);
+  const alturaPar=termos.reduce((s,t)=>s+alturaTermo(t[1]),0);
+  if(termos.length && y+alturaPar > H-20){ doc.addPage(); header(); y=26; }
+  termos.forEach(t=>termoPDF(t[0],t[1]));
 
   // ---- Fotos anexadas ----
   // Baixadas do Storage e embutidas: o PDF precisa ser um arquivo completo,
@@ -2754,28 +2772,67 @@ async function gerarDeclaracao(id){
   try{ fotos=await PORTARIA.listarFotos(id); }catch(e){}
   if(fotos.length){
     showToast('Baixando '+fotos.length+' foto(s) para o PDF…');
-    const LARG=(CW-6)/2, ALT=LARG*0.75;      // duas por linha, proporção 4:3
-    let col=0;
-    doc.addPage(); header(); y=26;
-    doc.setFontSize(8); doc.setFont('helvetica','bold'); setC(RED);
-    doc.text('FOTOS ANEXADAS',ML,y); y+=2;
-    setD(LGRAY); doc.setLineWidth(0.3); doc.line(ML,y,ML+CW,y); y+=5;
+    /* Tamanho real da imagem. Sem isto, a foto é esticada até preencher a
+       caixa e a de celular em pé sai achatada. */
+    async function dimensoes(b64){
+      try{
+        const p=doc.getImageProperties(b64);
+        if(p && p.width && p.height) return {w:p.width,h:p.height};
+      }catch(e){}
+      return await new Promise(ok=>{
+        const im=new Image();
+        im.onload =()=>ok({w:im.naturalWidth||4, h:im.naturalHeight||3});
+        im.onerror=()=>ok({w:4,h:3});
+        im.src=b64;
+      });
+    }
 
-    for(let i=0;i<fotos.length;i++){
-      const f=fotos[i];
+    // Baixa tudo antes de desenhar: a altura de cada linha depende das duas
+    // fotos que vão nela, então não dá para posicionar uma de cada vez.
+    const prontas=[];
+    for(const f of fotos){
       const b64=await PORTARIA.baixarFoto(f.caminho);
       if(!b64) continue;
-      if(y+ALT+9 > H-16){ doc.addPage(); header(); y=26; col=0; }
-      const x=ML+col*(LARG+6);
-      try{ doc.addImage(b64,'JPEG',x,y,LARG,ALT); }catch(e){ continue; }
-      setD(LGRAY); doc.setLineWidth(0.2); doc.rect(x,y,LARG,ALT);
-      doc.setFontSize(6.8); doc.setFont('helvetica','normal'); setC(GRAY);
-      doc.text((f.momento==='entrada'?'Entrada':'Saída')+' — foto '+(i+1)+
-               (f.marcada?'  (com marcação do porteiro)':''), x, y+ALT+3.4);
-      col++;
-      if(col>1){ col=0; y+=ALT+9; }
+      const d=await dimensoes(b64);
+      prontas.push({f:f, b64:b64, w:d.w, h:d.h});
     }
-    if(col>0) y+=ALT+9;
+
+    if(prontas.length){
+      // A caixa é o limite, não o formato: cada foto entra inteira nela,
+      // na proporção original.
+      const CAIXA_L=(CW-6)/2, CAIXA_A=74;
+      const escala=p=>{ const k=Math.min(CAIXA_L/p.w, CAIXA_A/p.h); return {l:p.w*k, a:p.h*k}; };
+
+      function tituloFotos(){
+        doc.setFontSize(8); doc.setFont('helvetica','bold'); setC(RED);
+        doc.text('FOTOS ANEXADAS',ML,y); y+=2;
+        setD(LGRAY); doc.setLineWidth(0.3); doc.line(ML,y,ML+CW,y); y+=5;
+      }
+
+      // Sem página nova forçada: as fotos seguem o documento. Só quebra se
+      // o título e a primeira linha realmente não couberem.
+      const primeira=Math.max(escala(prontas[0]).a, prontas[1]?escala(prontas[1]).a:0);
+      if(y+7+primeira+9 > H-18){ doc.addPage(); header(); y=26; }
+      tituloFotos();
+
+      for(let i=0;i<prontas.length;i+=2){
+        const par=prontas.slice(i,i+2).map(p=>{ const e=escala(p); return {f:p.f,b64:p.b64,l:e.l,a:e.a}; });
+        const alturaLinha=Math.max.apply(null,par.map(p=>p.a));
+
+        if(y+alturaLinha+9 > H-18){ doc.addPage(); header(); y=26; tituloFotos(); }
+
+        par.forEach((p,c)=>{
+          // Centralizada na coluna: foto em pé não fica encostada à esquerda.
+          const x0=ML+c*(CAIXA_L+6), x=x0+(CAIXA_L-p.l)/2;
+          try{ doc.addImage(p.b64,'JPEG',x,y,p.l,p.a); }catch(e){ return; }
+          setD(LGRAY); doc.setLineWidth(0.2); doc.rect(x,y,p.l,p.a);
+          doc.setFontSize(6.8); doc.setFont('helvetica','normal'); setC(GRAY);
+          doc.text((p.f.momento==='entrada'?'Entrada':'Saída')+' — foto '+(i+c+1)+
+                   (p.f.marcada?'  (com marcação do porteiro)':''), x0, y+alturaLinha+3.4);
+        });
+        y+=alturaLinha+9;
+      }
+    }
   }
 
   // ---- Selo de integridade ----
