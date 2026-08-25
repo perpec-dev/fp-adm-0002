@@ -15,6 +15,7 @@ O acesso exige matrícula e senha.
 - [Instalação](#instalação) ← **primeira vez, faça isto**
 - [Como usar no dia a dia](#como-usar-no-dia-a-dia)
 - [Código de cores](#código-de-cores)
+- [Fotos](#fotos)
 - [Armazenamento](#armazenamento) ← **leia esta parte**
 - [Segurança](#segurança)
 - [Perfis e permissões](#perfis-e-permissões)
@@ -171,14 +172,49 @@ Uma cor tem sempre o mesmo significado — na tela, na tabela e nos contadores:
 
 | Cor | Situação |
 |---|---|
-| 🔵 **Azul** | Está dentro, dentro do tempo normal |
-| 🟡 **Amarelo** | Dentro há mais de **12 h** — verificar |
-| 🔴 **Vermelho** | Dentro há mais de **24 h** — resolver |
+| 🔵 **Azul** | Está dentro da fábrica |
 | 🟢 **Verde** | Já saiu / registro concluído |
 
-Os limites de 12 h e 24 h são configuráveis (ver [Configuração](#configuração)).
-A legenda fica visível na aba *Estão dentro*, junto de quatro contadores clicáveis que
-filtram a lista por cor.
+O tempo de permanência é **apenas contabilizado e exibido**. Não há limite, alerta nem
+cobrança por demora: a aplicação registra quem entrou, quem está dentro, quem já saiu e
+quanto tempo ficou. A legenda fica visível na aba *Estão dentro*.
+
+Amarelo e vermelho continuam existindo na interface, mas só para avisos do próprio sistema
+— fila esperando envio, campo inválido, dados alterados por fora.
+
+---
+
+## Fotos
+
+Opcionais, tanto na entrada quanto na saída, sem limite prático (o teto é 12 por momento,
+configurável). Servem para registrar estado do veículo, carga, avarias ou documentos.
+
+**Como funciona no dia a dia**
+
+1. No passo 5 do formulário (ou na tela de saída), toque em *Tirar foto* ou
+   *Escolher do celular*. Pode anexar quantas quiser.
+2. Cada foto tem dois botões no canto: **lápis** para riscar e apontar, **X** para remover.
+3. No editor: **Riscar** (traço livre), **Seta**, quatro cores, *Desfazer* e
+   *Limpar marcações*. Arraste o dedo sobre a foto; com Seta, arraste do início até o ponto
+   que quer apontar.
+4. As fotos só são enviadas quando o registro é salvo.
+
+**O que acontece por trás**
+
+- A foto é **comprimida** antes de sair do aparelho: no máximo 1600 px no maior lado e
+  qualidade JPEG 0,72, o que transforma 4 MB em cerca de 200 KB sem perder legibilidade.
+- A marcação é **queimada na imagem**. O que o porteiro desenhou é exatamente o que fica
+  guardado e o que sai no PDF — não há como o desenho se perder ou ser reinterpretado.
+- O arquivo vai para o **bucket privado `fotos`** do Supabase Storage. Ele nunca é público:
+  cada exibição usa uma URL assinada válida por 1 hora, gerada na hora para quem tem sessão.
+- Sem internet, as fotos ficam no **IndexedDB** do aparelho (imagem não cabe no
+  `localStorage`) e sobem junto com o resto da fila quando a conexão volta. A tela mostra
+  quantas estão esperando.
+- **Apagar foto é ação de gestor** e fica registrada na auditoria. Uma foto enviada não pode
+  ser sobrescrita: corrigir uma marcação significa anexar outra, preservando a original.
+- As fotos entram no PDF de declaração, duas por linha, identificadas por momento
+  (entrada/saída) e sinalizadas quando têm marcação. Elas são **embutidas** no arquivo, para
+  o PDF continuar completo daqui a anos, sem depender de link nem de sessão.
 
 ---
 
@@ -203,6 +239,7 @@ janela anônima não perde nada — na próxima entrada com matrícula e senha t
 |---|---|
 | `perfis` | Porteiros e gestores: matrícula, nome, perfil, assinatura, ativo |
 | `registros` | Entradas e saídas |
+| `fotos` | Caminho e dono de cada foto. A imagem fica no bucket `fotos` do Storage |
 | `auditoria` | Histórico de eventos. Só cresce: a API não tem permissão de alterar nem apagar |
 | `contadores` | Numeração sequencial por ano. Nenhum usuário acessa direto |
 

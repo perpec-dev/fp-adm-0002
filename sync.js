@@ -48,6 +48,50 @@ window.PORTARIA = (function(){
   }
   function setEstado(e,msg){ estado=e; ultimoErro=msg||''; avisar(); }
 
+  /* ---------------- fotos pendentes (IndexedDB) ----------------
+     Imagem não cabe no localStorage: uma foto comprimida tem ~200 KB e a
+     cota inteira é de ~5 MB. As que ainda não subiram ficam aqui, e a fila
+     do outbox guarda só a referência. */
+  const IDB_NOME='perpec.portaria.fotos', IDB_STORE='pendentes';
+  function idbAbrir(){
+    return new Promise((res,rej)=>{
+      const r=indexedDB.open(IDB_NOME,1);
+      r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(IDB_STORE)) r.result.createObjectStore(IDB_STORE); };
+      r.onsuccess=()=>res(r.result);
+      r.onerror  =()=>rej(r.error);
+    });
+  }
+  function idbOp(modo,fn){
+    return idbAbrir().then(db=>new Promise((res,rej)=>{
+      const t=db.transaction(IDB_STORE,modo), s=t.objectStore(IDB_STORE);
+      let req; try{ req=fn(s); }catch(e){ rej(e); return; }
+      // 'result' precisa ser testado por existência, não por valor: um get
+      // que não achou nada devolve undefined, e devolver o próprio request
+      // no lugar faria a checagem de "foto ausente" passar batido.
+      t.oncomplete=()=>res(req && typeof req==='object' && 'result' in req ? req.result : undefined);
+      t.onerror   =()=>rej(t.error);
+    }));
+  }
+  const fotoGuardar = (id,dataUrl)=>idbOp('readwrite',s=>s.put(dataUrl,id));
+  const fotoLer     = id          =>idbOp('readonly', s=>s.get(id));
+  const fotoRemover = id          =>idbOp('readwrite',s=>s.delete(id));
+
+  /* dataURL -> Blob, para subir como arquivo binário (não como texto). */
+  function dataUrlParaBlob(dataUrl){
+    const [cab,b64]=String(dataUrl).split(',');
+    const mime=(cab.match(/data:([^;]+)/)||[,'image/jpeg'])[1];
+    const bin=atob(b64), arr=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    return new Blob([arr],{type:mime});
+  }
+  function blobParaDataUrl(blob){
+    return new Promise((res,rej)=>{
+      const fr=new FileReader();
+      fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error);
+      fr.readAsDataURL(blob);
+    });
+  }
+
   /* ---------------- fila offline (outbox) ---------------- */
   function fila(){
     try{ return JSON.parse(localStorage.getItem(CHAVE_FILA)||'[]'); }catch(e){ return []; }
@@ -294,6 +338,56 @@ window.PORTARIA = (function(){
     return data;
   }
 
+  /* ---------------- fotos ----------------
+     A imagem vai para o IndexedDB e a fila leva só a referência. Assim uma
+     entrada com 6 fotos não estoura o localStorage nem trava a fila. */
+  async function anexarFoto(registroId, momento, dataUrl, ordem, marcada){
+    const fotoId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+                 : 'f'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+    await fotoGuardar(fotoId, dataUrl);
+    enfileirar('foto_upload', { fotoId, registroId, momento, ordem:ordem||0, marcada:!!marcada });
+    descarregar();
+    return fotoId;
+  }
+
+  async function listarFotos(registroId){
+    if(!sb || !perfil) return [];
+    const { data, error } = await sb.from('fotos')
+      .select('id,registro_id,momento,caminho,ordem,marcada,criado_em')
+      .eq('registro_id', registroId).order('momento').order('ordem');
+    if(error || !data || !data.length) return [];
+
+    // Bucket privado: cada exibição usa uma URL assinada de curta duração.
+    const { data:urls } = await sb.storage.from('fotos')
+      .createSignedUrls(data.map(f=>f.caminho), 3600);
+    const porCaminho={};
+    (urls||[]).forEach(u=>{ if(u && u.path) porCaminho[u.path]=u.signedUrl; });
+    return data.map(f=>({ id:f.id, momento:f.momento, caminho:f.caminho, ordem:f.ordem,
+                          marcada:f.marcada, url:porCaminho[f.caminho]||'' }));
+  }
+
+  /* Bytes reais da foto — usado pelo PDF, que não aceita URL remota. */
+  async function baixarFoto(caminho){
+    if(!sb) return null;
+    const { data, error } = await sb.storage.from('fotos').download(caminho);
+    if(error || !data) return null;
+    try{ return await blobParaDataUrl(data); }catch(e){ return null; }
+  }
+
+  async function apagarFoto(id, caminho){
+    if(!sb) throw new Error('Sem conexão.');
+    const { error } = await sb.from('fotos').delete().eq('id', id);
+    if(error) throw new Error(error.message);
+    await sb.storage.from('fotos').remove([caminho]);   // órfão no bucket não é crítico
+    return true;
+  }
+
+  /* Quantas fotos ainda não subiram (para a tela avisar). */
+  function fotosPendentes(registroId){
+    return fila().filter(i=>i.tipo==='foto_upload' &&
+      (!registroId || i.payload.registroId===registroId)).length;
+  }
+
   function criarRegistro(r){   enfileirar('reg_insert', r);        return descarregar(); }
   function atualizarRegistro(r){ enfileirar('reg_update', r);      return descarregar(); }
   function apagarRegistro(id){ enfileirar('reg_delete', {id});     return descarregar(); }
@@ -379,6 +473,28 @@ window.PORTARIA = (function(){
     else if(item.tipo==='aud_insert'){
       const { error } = await sb.from('auditoria').insert(item.payload);
       if(error) throw error;
+    }
+    else if(item.tipo==='foto_upload'){
+      const p=item.payload;
+      const dataUrl=await fotoLer(p.fotoId);
+      if(!dataUrl){
+        // Cache do aparelho foi limpo antes do envio: nada a fazer, e
+        // insistir travaria a fila para sempre.
+        const e=new Error('Foto não está mais neste aparelho.'); e.code='foto_ausente'; throw e;
+      }
+      const caminho = p.registroId+'/'+p.momento+'-'+String(p.ordem).padStart(2,'0')+'-'+p.fotoId+'.jpg';
+      const { error:eUp } = await sb.storage.from('fotos')
+        .upload(caminho, dataUrlParaBlob(dataUrl), { contentType:'image/jpeg', upsert:false });
+      // "already exists" = reenvio de um item que já subiu; segue em frente.
+      if(eUp && !/exists|duplicate/i.test(eUp.message||'')) throw eUp;
+
+      const { error:eIns } = await sb.from('fotos').insert({
+        id:p.fotoId, registro_id:p.registroId, momento:p.momento,
+        caminho, ordem:p.ordem, marcada:!!p.marcada
+      });
+      if(eIns && !/duplicate|unique/i.test(eIns.message||'')) throw eIns;
+
+      await fotoRemover(p.fotoId);
     }
     else if(item.tipo==='perfil_update'){
       const p=item.payload;
@@ -480,6 +596,7 @@ window.PORTARIA = (function(){
     iniciar, entrar, sair, trocarSenha, emailDeMatricula,
     puxarTudo, puxarNovidades, carregarAuditoria,
     criarRegistro, atualizarRegistro, apagarRegistro, auditar,
+    anexarFoto, listarFotos, baixarFoto, apagarFoto, fotosPendentes,
     descarregar, numeroNovo,
     criarPorteiro, salvarPerfil, apagarPerfil,
     revelarDocumento, anonimizarAntigos,

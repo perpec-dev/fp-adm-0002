@@ -141,6 +141,27 @@ comment on column public.registros.documento is
 
 
 -- =====================================================================
+-- 3b. FOTOS  — anexos opcionais da entrada e da saída
+--     A imagem em si vai para o Storage (bucket "fotos"); aqui fica só
+--     o caminho e a quem pertence.
+-- =====================================================================
+create table if not exists public.fotos (
+  id           uuid primary key default gen_random_uuid(),
+  registro_id  uuid not null references public.registros(id) on delete cascade,
+  momento      text not null check (momento in ('entrada','saida')),
+  caminho      text not null unique,          -- caminho dentro do bucket
+  ordem        integer not null default 0,
+  marcada      boolean not null default false,-- true = tem riscos/setas do porteiro
+  criado_em    timestamptz not null default now(),
+  criado_por   uuid not null default auth.uid()
+);
+create index if not exists fotos_registro_idx on public.fotos (registro_id, momento, ordem);
+
+comment on table public.fotos is
+  'Fotos anexadas na entrada ou na saída. O arquivo fica no bucket "fotos" do Storage.';
+
+
+-- =====================================================================
 -- 4. AUDITORIA  — só cresce, ninguém edita nem apaga pela API
 -- =====================================================================
 create table if not exists public.auditoria (
@@ -282,8 +303,15 @@ create trigger perfis_ultimo_gestor before update or delete on public.perfis
 --    O Supabase concede tudo por padrão. Aqui derrubamos e devolvemos
 --    coluna a coluna — é isto que impede a leitura de "documento".
 -- =====================================================================
-revoke all on public.perfis, public.registros, public.auditoria, public.contadores
+revoke all on public.perfis, public.registros, public.auditoria, public.contadores, public.fotos
   from anon, authenticated;
+
+-- FOTOS
+grant select (id, registro_id, momento, caminho, ordem, marcada, criado_em, criado_por)
+  on public.fotos to authenticated;
+grant insert (id, registro_id, momento, caminho, ordem, marcada)
+  on public.fotos to authenticated;
+grant delete on public.fotos to authenticated;
 
 -- PERFIS
 grant select (id, matricula, nome, papel, assinatura, ativo, criado_em, atualizado_em)
@@ -382,8 +410,52 @@ create policy aud_ler on public.auditoria for select to authenticated
 create policy aud_criar on public.auditoria for insert to authenticated
   with check (public.sou_ativo());
 
+-- FOTOS
+drop policy if exists fot_ler   on public.fotos;
+drop policy if exists fot_criar on public.fotos;
+drop policy if exists fot_apagar on public.fotos;
+
+create policy fot_ler on public.fotos for select to authenticated
+  using (public.sou_ativo());
+
+create policy fot_criar on public.fotos for insert to authenticated
+  with check (public.sou_ativo());
+
+-- Apagar foto é ação de gestor: a foto é evidência do que foi registrado.
+create policy fot_apagar on public.fotos for delete to authenticated
+  using (public.sou_gestor());
+
 -- CONTADORES: ninguém toca direto; só a função proximo_numero() (security definer).
 -- RLS ligada e nenhuma política = acesso negado a todos pela API.
+
+
+-- =====================================================================
+-- 9b. STORAGE — bucket das fotos
+--     Privado: o arquivo só é acessível por quem tem sessão, e sempre
+--     através de uma URL assinada de curta duração gerada na hora.
+-- =====================================================================
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('fotos', 'fotos', false, 5242880, array['image/jpeg','image/png'])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = 5242880,
+      allowed_mime_types = array['image/jpeg','image/png'];
+
+drop policy if exists fotos_obj_ler    on storage.objects;
+drop policy if exists fotos_obj_criar  on storage.objects;
+drop policy if exists fotos_obj_apagar on storage.objects;
+
+create policy fotos_obj_ler on storage.objects for select to authenticated
+  using (bucket_id = 'fotos' and public.sou_ativo());
+
+create policy fotos_obj_criar on storage.objects for insert to authenticated
+  with check (bucket_id = 'fotos' and public.sou_ativo());
+
+create policy fotos_obj_apagar on storage.objects for delete to authenticated
+  using (bucket_id = 'fotos' and public.sou_gestor());
+
+-- Sem política de update: um arquivo enviado não é sobrescrito. Corrigir
+-- uma marcação significa anexar outra foto, preservando a original.
 
 
 -- =====================================================================

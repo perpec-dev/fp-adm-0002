@@ -32,15 +32,16 @@
     // Formato final: PREFIXO-ANO-0001 (sequência reinicia a cada ano).
     PREFIXO_REGISTRO: "PORT",
 
-    // ---- Banco de dados local (navegador) ----
-    // Tudo fica no localStorage deste navegador/perfil. Não há servidor.
-    // Use "Backup" no Histórico para levar os dados a outra máquina.
+    // ---- Cópia local (navegador) ----
+    // Só cache do que veio do servidor + fila de envio. Ver sync.js.
     DB_KEY: "perpec.portaria.v1",
 
-    // ---- Semáforo de permanência (veículo ainda dentro da unidade) ----
-    // AZUL até ALERTA_H · AMARELO a partir de ALERTA_H · VERMELHO a partir de CRITICO_H
-    ALERTA_PERMANENCIA_H: 12,
-    CRITICO_PERMANENCIA_H: 24,
+    // ---- Fotos ----
+    // Comprime antes de enviar: foto de celular tem 4 MB, o que interessa
+    // aqui cabe em ~200 KB e sai legível no PDF.
+    FOTO_MAX_PX: 1600,      // maior lado, em pixels
+    FOTO_QUALIDADE: 0.72,   // qualidade JPEG (0 a 1)
+    FOTO_MAX_POR_MOMENTO: 12,
 
     // ---- Tolerâncias de data/hora ----
     TOLERANCIA_FUTURO_MIN: 5,   // minutos aceitos "no futuro" (relógio do PC)
@@ -82,11 +83,11 @@
   --yellow:#B7791F;--yellow-bg:#FEF7E6;--yellow-bd:#F0D98A;
   --blue:#3D5AC0;--blue-bg:#EEF2FF;--blue-bd:#B9C5EC;
 
-  /* ---- SEMÁFORO DE SITUAÇÃO (uma cor = um significado, em todo o sistema) ----
-     AZUL     dentro da unidade, tudo normal
-     AMARELO  dentro há muito tempo — verificar
-     VERMELHO dentro há tempo demais — providência urgente
-     VERDE    já saiu, registro concluído                                  */
+  /* ---- SITUAÇÃO (uma cor = um significado, em todo o sistema) ----
+     AZUL   está dentro da fábrica
+     VERDE  já saiu, registro concluído
+     Os tons WARN e LATE seguem definidos porque avisos e erros da
+     interface os usam (fila pendente, dados alterados, campo inválido). */
   --st-in:#3D5AC0;   --st-in-bg:#EEF2FF;   --st-in-bd:#B9C5EC;
   --st-warn:#B7791F; --st-warn-bg:#FEF7E6; --st-warn-bd:#F0D98A;
   --st-late:#C0392B; --st-late-bg:#FDECEA; --st-late-bd:#E8B8B0;
@@ -193,26 +194,7 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(
          border-radius:var(--radius);padding:10px 13px;margin-bottom:14px}
 .legenda .lg{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--text)}
 .legenda .dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(0,0,0,.12)}
-.dot.c-in{background:var(--st-in)} .dot.c-warn{background:var(--st-warn)}
-.dot.c-late{background:var(--st-late)} .dot.c-out{background:var(--st-out)}
-
-/* ====== PAINEL RESUMO (contadores clicáveis por cor) ====== */
-.resumo{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
-@media(max-width:640px){.resumo{grid-template-columns:1fr 1fr}}
-.tile{border:2px solid var(--border);background:var(--surface);border-radius:var(--radius);padding:12px 10px;
-      text-align:center;cursor:pointer;font-family:inherit;transition:all .13s}
-.tile:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.1)}
-.tile .num{font-size:28px;font-weight:800;line-height:1}
-.tile .lab{font-size:11.5px;font-weight:700;margin-top:5px;letter-spacing:.02em}
-.tile.t-all{border-color:var(--border2)}          .tile.t-all .num{color:var(--dark)}          .tile.t-all .lab{color:var(--muted)}
-.tile.t-in{border-color:var(--st-in-bd)}          .tile.t-in .num{color:var(--st-in)}          .tile.t-in .lab{color:var(--st-in)}
-.tile.t-warn{border-color:var(--st-warn-bd)}      .tile.t-warn .num{color:var(--st-warn)}      .tile.t-warn .lab{color:var(--st-warn)}
-.tile.t-late{border-color:var(--st-late-bd)}      .tile.t-late .num{color:var(--st-late)}      .tile.t-late .lab{color:var(--st-late)}
-.tile.sel{box-shadow:0 0 0 3px rgba(0,0,0,.07)}
-.tile.sel.t-all{background:var(--surface2)}
-.tile.sel.t-in{background:var(--st-in-bg)}
-.tile.sel.t-warn{background:var(--st-warn-bg)}
-.tile.sel.t-late{background:var(--st-late-bg)}
+.dot.c-in{background:var(--st-in)} .dot.c-out{background:var(--st-out)}
 
 /* ====== ASSINATURA DESENHADA ====== */
 .assin-box{border:2px dashed var(--border2);border-radius:var(--radius);background:#fff;position:relative;overflow:hidden}
@@ -254,15 +236,11 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(
      background:var(--surface);margin-bottom:12px;transition:box-shadow .13s,border-color .13s;cursor:pointer;overflow:hidden}
 .rec:hover{box-shadow:0 4px 16px rgba(0,0,0,.1)}
 .rec.s-in{border-left-color:var(--st-in)}
-.rec.s-warn{border-left-color:var(--st-warn)}
-.rec.s-late{border-left-color:var(--st-late)}
 .rec.s-out{border-left-color:var(--st-out)}
 /* Faixa colorida no topo: a situação é lida pela cor antes do texto */
 .rec-status{display:flex;align-items:center;gap:9px;padding:8px 14px;font-size:12.5px;font-weight:800;
             letter-spacing:.03em;text-transform:uppercase;border-bottom:1px solid var(--border)}
 .rec.s-in   .rec-status{background:var(--st-in-bg);color:var(--st-in)}
-.rec.s-warn .rec-status{background:var(--st-warn-bg);color:var(--st-warn)}
-.rec.s-late .rec-status{background:var(--st-late-bg);color:var(--st-late)}
 .rec.s-out  .rec-status{background:var(--st-out-bg);color:var(--st-out)}
 .rec-status .dot{width:11px;height:11px;border-radius:50%;background:currentColor;flex-shrink:0}
 .rec-status .tempo{margin-left:auto;font-weight:800;letter-spacing:0;text-transform:none;font-size:13px}
@@ -294,10 +272,8 @@ table.tbl th{background:var(--surface2);color:var(--muted);font-size:10.5px;font
 table.tbl td{padding:10px;border-bottom:1px solid var(--border);vertical-align:top;color:var(--text)}
 table.tbl tbody tr{cursor:pointer;transition:background .1s}
 table.tbl tbody tr:hover{background:var(--surface2)}
-table.tbl tbody tr.l-in   td:first-child{box-shadow:inset 5px 0 0 var(--st-in)}
-table.tbl tbody tr.l-warn td:first-child{box-shadow:inset 5px 0 0 var(--st-warn)}
-table.tbl tbody tr.l-late td:first-child{box-shadow:inset 5px 0 0 var(--st-late)}
-table.tbl tbody tr.l-out  td:first-child{box-shadow:inset 5px 0 0 var(--st-out)}
+table.tbl tbody tr.l-in  td:first-child{box-shadow:inset 5px 0 0 var(--st-in)}
+table.tbl tbody tr.l-out td:first-child{box-shadow:inset 5px 0 0 var(--st-out)}
 table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spacing:.06em}
 .tbl-sum{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:12px}
 .tbl-sum b{color:var(--text);font-weight:800}
@@ -374,6 +350,46 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
 
 /* Etiqueta de registro ainda não enviado ao servidor */
 .bdg.b-fila{background:var(--st-warn-bg);color:var(--st-warn);border-color:var(--st-warn-bd)}
+
+/* ====== FOTOS ====== */
+.fotos-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:12px}
+.foto-item{position:relative;border:1.5px solid var(--border2);border-radius:var(--radius);overflow:hidden;
+           background:var(--surface2);aspect-ratio:4/3}
+.foto-item img{width:100%;height:100%;object-fit:cover;display:block;cursor:pointer}
+.foto-item .marca{position:absolute;left:6px;top:6px;font-size:9.5px;font-weight:800;letter-spacing:.05em;
+                  text-transform:uppercase;padding:2px 7px;border-radius:20px;
+                  background:var(--st-late);color:#fff}
+.foto-item .acoes{position:absolute;right:5px;bottom:5px;display:flex;gap:5px}
+.foto-item .fbtn{width:32px;height:32px;border-radius:8px;border:none;background:rgba(26,18,16,.78);color:#fff;
+                 font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;
+                 font-family:inherit;padding:0}
+.foto-item .fbtn:hover{background:var(--red)}
+.foto-item .fbtn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2.3;
+                     stroke-linecap:round;stroke-linejoin:round}
+.foto-vazio{font-size:13px;color:var(--muted);font-style:italic;margin-top:10px}
+
+/* Editor de marcação */
+.ed-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.ed-tool{padding:9px 14px;min-height:42px;border:2px solid var(--border2);border-radius:var(--radius);
+         background:var(--surface);font-family:inherit;font-size:13.5px;font-weight:700;color:var(--muted);
+         cursor:pointer;transition:all .13s;display:flex;align-items:center;gap:7px}
+.ed-tool:hover{border-color:#9A9087}
+.ed-tool.sel{border-color:var(--red);background:var(--accent-lt);color:var(--red)}
+.ed-tool svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:2.3;
+             stroke-linecap:round;stroke-linejoin:round}
+.ed-cores{display:flex;gap:6px;margin-left:auto}
+.ed-cor{width:34px;height:34px;border-radius:50%;border:3px solid var(--border2);cursor:pointer;padding:0}
+.ed-cor.sel{border-color:var(--dark);transform:scale(1.12)}
+.ed-canvas{border:1px solid var(--border2);border-radius:var(--radius);background:#000;overflow:hidden;
+           display:flex;align-items:center;justify-content:center}
+.ed-canvas canvas{max-width:100%;max-height:56vh;display:block;touch-action:none;cursor:crosshair}
+.ed-dica{font-size:12.5px;color:var(--muted);margin-top:10px;font-style:italic}
+
+/* Visualização ampliada */
+.lupa{position:fixed;inset:0;z-index:9600;background:rgba(10,7,6,.92);display:flex;align-items:center;
+      justify-content:center;padding:1rem;cursor:zoom-out}
+.lupa[hidden]{display:none}
+.lupa img{max-width:100%;max-height:100%;object-fit:contain;border-radius:var(--radius)}
 
 /* Campo de documento mascarado */
 .doc-mask{display:inline-flex;align-items:center;gap:9px;flex-wrap:wrap}
@@ -578,6 +594,34 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
       <div class="card">
         <div class="card-head">
           <span class="step">5</span>
+          <h2>Fotos (opcional)</h2>
+        </div>
+        <div class="card-body">
+          <div class="act-group">
+            <button class="btn btn-outline" type="button" onclick="document.getElementById('fCamEntrada').click()">
+              <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              Tirar foto
+            </button>
+            <button class="btn btn-outline" type="button" onclick="document.getElementById('fArqEntrada').click()">
+              <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+              Escolher do celular
+            </button>
+          </div>
+          <input type="file" id="fCamEntrada" accept="image/*" capture="environment" multiple hidden
+                 onchange="adicionarFotos(this,'entrada')">
+          <input type="file" id="fArqEntrada" accept="image/*" multiple hidden
+                 onchange="adicionarFotos(this,'entrada')">
+          <div id="fotosEntrada"></div>
+          <div class="warn-box w" style="margin:14px 0 0">
+            As fotos só são enviadas quando você tocar em <b>LIBERAR ENTRADA</b>. Se atualizar a
+            página antes disso, elas se perdem.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span class="step">6</span>
           <h2>Anotações e confirmação</h2>
         </div>
         <div class="card-body">
@@ -630,11 +674,8 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
         <span class="count-pill" id="pillAbertos">—</span>
       </div>
       <div class="card-body">
-        <div class="resumo" id="resumoAbertos"></div>
         <div class="legenda">
-          <span class="lg"><i class="dot c-in"></i> Dentro, tudo normal</span>
-          <span class="lg"><i class="dot c-warn"></i> Dentro há mais de <b id="lgH1"></b>h — verificar</span>
-          <span class="lg"><i class="dot c-late"></i> Dentro há mais de <b id="lgH2"></b>h — resolver</span>
+          <span class="lg"><i class="dot c-in"></i> Está dentro da fábrica</span>
           <span class="lg"><i class="dot c-out"></i> Já saiu</span>
         </div>
         <div class="field" style="margin-bottom:14px">
@@ -779,6 +820,9 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
   </div>
 </div>
 
+<!-- Foto ampliada -->
+<div class="lupa" id="lupa" hidden onclick="this.hidden=true"><img id="lupaImg" alt="foto"/></div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -804,19 +848,22 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
        inteiro: a tela recebe só a máscara. O valor completo sai por
        uma função exclusiva de gestor, que registra a consulta.
 
-   CÓDIGO DE CORES (vale em toda a interface e nos PDFs):
-     AZUL     dentro da unidade, dentro do tempo normal
-     AMARELO  dentro há mais de CONFIG.ALERTA_PERMANENCIA_H horas
-     VERMELHO dentro há mais de CONFIG.CRITICO_PERMANENCIA_H horas
-     VERDE    já saiu / registro concluído
+   CÓDIGO DE CORES (vale em toda a interface):
+     AZUL   está dentro da fábrica
+     VERDE  já saiu / registro concluído
+   O tempo de permanência é apenas contabilizado e exibido — não existe
+   limite nem alerta por demora.
    ================================================================ */
 
 /* ---------------- Estado em memória ---------------- */
 let DB = null;             // cópia local (ver dbVazio())
 let ABA = 'novo';          // aba corrente
 let MODAL_ID = null;       // id do registro aberto no modal
-let FILTRO_ABERTOS = '';   // '', 'in', 'warn', 'late' — filtro do painel resumo
 let PAD = null;            // instância do bloco de assinatura em uso
+let EDITOR = null;         // editor de marcação de foto aberto
+
+// Fotos escolhidas mas ainda não enviadas. Cada item: {id, dataUrl, marcada}
+const FOTOS = { entrada:[], saida:[] };
 let EU = null;             // perfil logado: {id, matricula, nome, papel, assinatura}
 
 const souGestor = () => !!EU && EU.papel==='gestor';
@@ -994,19 +1041,8 @@ function limparErros(){ document.querySelectorAll('.field.err').forEach(f=>f.cla
    situacao() é a fonte única do código de cores. Tudo o que pinta
    algo na tela (cartão, tabela, painel, badge) passa por aqui.
    ================================================================ */
-function situacao(r){
-  if(r.status!=='aberto') return 'out';
-  const h=permanenciaMs(r)/3600000;
-  if(h>=CONFIG.CRITICO_PERMANENCIA_H) return 'late';
-  if(h>=CONFIG.ALERTA_PERMANENCIA_H)  return 'warn';
-  return 'in';
-}
-const ROTULO_SIT = {
-  in:  'Está dentro',
-  warn:'Dentro há muito tempo',
-  late:'Dentro há tempo demais',
-  out: 'Já saiu'
-};
+function situacao(r){ return r.status==='aberto' ? 'in' : 'out'; }
+const ROTULO_SIT = { in:'Está dentro', out:'Já saiu' };
 
 /* ================================================================
    5. TRILHA DE AUDITORIA
@@ -1088,6 +1124,234 @@ function htmlPad(id){
          '<div style="display:flex;justify-content:flex-end;margin-top:8px">'+
            '<button class="btn btn-outline btn-sm" type="button" onclick="PAD&&PAD.limpar()">Apagar e assinar de novo</button>'+
          '</div>';
+}
+
+/* ================================================================
+   6b. FOTOS — captura, marcação e galeria
+   ----------------------------------------------------------------
+   Opcional na entrada e na saída, quantas o porteiro quiser.
+   O porteiro pode riscar e apontar setas em cima da foto; a marcação
+   é "queimada" na imagem, então o que ele desenhou é exatamente o que
+   sai no PDF e o que fica guardado como evidência.
+   ================================================================ */
+
+/* Foto de celular tem 3–5 MB. O que interessa aqui cabe em ~200 KB e
+   ainda sai legível no PDF. Sem isto, o envio e o armazenamento
+   ficariam inviáveis. */
+function comprimirImagem(file){
+  return new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const max=CONFIG.FOTO_MAX_PX;
+        let w=img.naturalWidth, h=img.naturalHeight;
+        if(!w||!h){ rej(new Error('Imagem inválida.')); return; }
+        if(Math.max(w,h)>max){ const f=max/Math.max(w,h); w=Math.round(w*f); h=Math.round(h*f); }
+        const cv=document.createElement('canvas');
+        cv.width=w; cv.height=h;
+        const ctx=cv.getContext('2d');
+        ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);   // PNG com transparência não vira JPEG preto
+        ctx.drawImage(img,0,0,w,h);
+        res(cv.toDataURL('image/jpeg',CONFIG.FOTO_QUALIDADE));
+      };
+      img.onerror=()=>rej(new Error('Não consegui abrir a imagem.'));
+      img.src=fr.result;
+    };
+    fr.onerror=()=>rej(new Error('Não consegui ler o arquivo.'));
+    fr.readAsDataURL(file);
+  });
+}
+
+async function adicionarFotos(input, momento){
+  const arqs=Array.from(input.files||[]);
+  input.value='';
+  if(!arqs.length) return;
+
+  const cabem=CONFIG.FOTO_MAX_POR_MOMENTO-FOTOS[momento].length;
+  if(cabem<=0){ showToast('Limite de '+CONFIG.FOTO_MAX_POR_MOMENTO+' fotos atingido.','error'); return; }
+  const lista=arqs.slice(0,cabem);
+  if(arqs.length>cabem) showToast('Só couberam '+cabem+' foto(s): o limite é '+CONFIG.FOTO_MAX_POR_MOMENTO+'.','error');
+
+  showToast('Preparando '+lista.length+' foto(s)…');
+  for(const f of lista){
+    try{
+      const dataUrl=await comprimirImagem(f);
+      FOTOS[momento].push({ id:uid(), dataUrl, marcada:false });
+    }catch(e){ showToast(e.message||'Não consegui usar uma das fotos.','error'); }
+  }
+  renderFotos(momento);
+  showToast(FOTOS[momento].length+' foto(s) anexada(s).','success');
+}
+
+function renderFotos(momento){
+  const alvo=document.getElementById(momento==='entrada'?'fotosEntrada':'fotosSaida');
+  if(!alvo) return;
+  const lista=FOTOS[momento];
+  if(!lista.length){ alvo.innerHTML='<div class="foto-vazio">Nenhuma foto anexada.</div>'; return; }
+  alvo.innerHTML='<div class="fotos-grid">'+lista.map((f,i)=>
+    '<div class="foto-item">'+
+      (f.marcada?'<span class="marca">marcada</span>':'')+
+      '<img src="'+f.dataUrl+'" alt="foto '+(i+1)+'" onclick="ampliar(\''+momento+'\','+i+')">'+
+      '<div class="acoes">'+
+        '<button type="button" class="fbtn" title="Riscar / apontar" onclick="abrirEditorFoto(\''+momento+'\','+i+')">'+
+          '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></button>'+
+        '<button type="button" class="fbtn" title="Remover" onclick="removerFoto(\''+momento+'\','+i+')">'+
+          '<svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>'+
+      '</div>'+
+    '</div>').join('')+'</div>';
+}
+
+function ampliar(momento, i){
+  const f=FOTOS[momento][i]; if(!f) return;
+  ampliarUrl(f.dataUrl);
+}
+function ampliarUrl(url){
+  document.getElementById('lupaImg').src=url;
+  document.getElementById('lupa').hidden=false;
+}
+
+function removerFoto(momento,i){
+  if(!confirm('Remover esta foto?')) return;
+  FOTOS[momento].splice(i,1);
+  renderFotos(momento);
+}
+
+/* ---- Editor de marcação ----
+   Guarda os traços numa lista e redesenha tudo a cada mudança: é o que
+   permite "Desfazer" sem precisar de camadas ou histórico de imagem. */
+function abrirEditorFoto(momento, i){
+  const f=FOTOS[momento][i]; if(!f) return;
+  abrirModalCustom('Riscar e apontar',
+    '<div class="ed-tools">'+
+      '<button type="button" class="ed-tool sel" id="edLivre" onclick="edFerramenta(\'livre\')">'+
+        '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>Riscar</button>'+
+      '<button type="button" class="ed-tool" id="edSeta" onclick="edFerramenta(\'seta\')">'+
+        '<svg viewBox="0 0 24 24"><path d="M5 19L19 5"/><path d="M11 5h8v8"/></svg>Seta</button>'+
+      '<button type="button" class="ed-tool" onclick="edDesfazer()">'+
+        '<svg viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-15-6.7L3 13"/></svg>Desfazer</button>'+
+      '<div class="ed-cores">'+
+        '<button type="button" class="ed-cor sel" style="background:#E4322B" onclick="edCor(\'#E4322B\',this)"></button>'+
+        '<button type="button" class="ed-cor" style="background:#FFD400" onclick="edCor(\'#FFD400\',this)"></button>'+
+        '<button type="button" class="ed-cor" style="background:#00C2FF" onclick="edCor(\'#00C2FF\',this)"></button>'+
+        '<button type="button" class="ed-cor" style="background:#FFFFFF" onclick="edCor(\'#FFFFFF\',this)"></button>'+
+      '</div>'+
+    '</div>'+
+    '<div class="ed-canvas"><canvas id="edCanvas"></canvas></div>'+
+    '<div class="ed-dica">Arraste o dedo (ou o mouse) sobre a foto. Com <b>Seta</b>, arraste do início ao ponto que quer apontar.</div>',
+    [{txt:'Cancelar',cls:'btn-outline',fn:()=>{ EDITOR=null; fecharModal(); }},
+     {txt:'Limpar marcações',cls:'btn-outline',fn:edLimpar},
+     {txt:'Salvar marcação',cls:'btn-red',fn:()=>edSalvar(momento,i)}]);
+
+  setTimeout(()=>iniciarEditor(f.dataUrl),60);
+}
+
+function iniciarEditor(dataUrl){
+  const cv=document.getElementById('edCanvas');
+  const img=new Image();
+  img.onload=()=>{
+    cv.width=img.naturalWidth; cv.height=img.naturalHeight;
+    EDITOR={ cv, ctx:cv.getContext('2d'), img, tracos:[], cor:'#E4322B', tipo:'livre',
+             // Espessura proporcional: um traço de 4px some numa foto de 1600px.
+             esp:Math.max(3, Math.round(Math.max(cv.width,cv.height)/220)) };
+    edRedesenhar();
+
+    const ponto=ev=>{
+      const b=cv.getBoundingClientRect();
+      return { x:(ev.clientX-b.left)*(cv.width/b.width), y:(ev.clientY-b.top)*(cv.height/b.height) };
+    };
+    let desenhando=false;
+    cv.addEventListener('pointerdown',ev=>{
+      if(!EDITOR) return;
+      ev.preventDefault(); desenhando=true;
+      EDITOR.tracos.push({ tipo:EDITOR.tipo, cor:EDITOR.cor, esp:EDITOR.esp, pontos:[ponto(ev)] });
+      try{ cv.setPointerCapture(ev.pointerId); }catch(e){}
+    });
+    cv.addEventListener('pointermove',ev=>{
+      if(!desenhando||!EDITOR) return;
+      ev.preventDefault();
+      const t=EDITOR.tracos[EDITOR.tracos.length-1];
+      // A seta só precisa de dois pontos: origem e ponta.
+      if(t.tipo==='seta') t.pontos[1]=ponto(ev); else t.pontos.push(ponto(ev));
+      edRedesenhar();
+    });
+    const fim=()=>{ desenhando=false; };
+    cv.addEventListener('pointerup',fim);
+    cv.addEventListener('pointercancel',fim);
+    cv.addEventListener('pointerleave',fim);
+  };
+  img.src=dataUrl;
+}
+
+function edRedesenhar(){
+  if(!EDITOR) return;
+  const {ctx,cv,img,tracos}=EDITOR;
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(img,0,0,cv.width,cv.height);
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  tracos.forEach(t=>{
+    if(!t.pontos.length) return;
+    ctx.strokeStyle=t.cor; ctx.fillStyle=t.cor; ctx.lineWidth=t.esp;
+    if(t.tipo==='seta'){
+      const a=t.pontos[0], b=t.pontos[1]||t.pontos[0];
+      desenharSeta(ctx,a.x,a.y,b.x,b.y,t.esp);
+    }else{
+      ctx.beginPath(); ctx.moveTo(t.pontos[0].x,t.pontos[0].y);
+      t.pontos.forEach(p=>ctx.lineTo(p.x,p.y));
+      ctx.stroke();
+    }
+  });
+}
+
+function desenharSeta(ctx,x1,y1,x2,y2,esp){
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  const ang=Math.atan2(y2-y1,x2-x1), L=esp*4.5;
+  if(!isFinite(ang)) return;
+  ctx.beginPath();
+  ctx.moveTo(x2,y2);
+  ctx.lineTo(x2-L*Math.cos(ang-Math.PI/7), y2-L*Math.sin(ang-Math.PI/7));
+  ctx.lineTo(x2-L*Math.cos(ang+Math.PI/7), y2-L*Math.sin(ang+Math.PI/7));
+  ctx.closePath(); ctx.fill();
+}
+
+function edFerramenta(t){
+  if(!EDITOR) return;
+  EDITOR.tipo=t;
+  document.getElementById('edLivre').classList.toggle('sel',t==='livre');
+  document.getElementById('edSeta').classList.toggle('sel',t==='seta');
+}
+function edCor(c,btn){
+  if(!EDITOR) return;
+  EDITOR.cor=c;
+  document.querySelectorAll('.ed-cor').forEach(b=>b.classList.remove('sel'));
+  btn.classList.add('sel');
+}
+function edDesfazer(){ if(!EDITOR||!EDITOR.tracos.length) return; EDITOR.tracos.pop(); edRedesenhar(); }
+function edLimpar(){ if(!EDITOR) return; EDITOR.tracos=[]; edRedesenhar(); }
+
+function edSalvar(momento,i){
+  if(!EDITOR){ fecharModal(); return; }
+  const f=FOTOS[momento][i];
+  if(f){
+    // Marcação queimada na imagem: o que foi desenhado é o que vai
+    // para o servidor e para o PDF, sem depender de reinterpretação.
+    f.dataUrl=EDITOR.cv.toDataURL('image/jpeg',CONFIG.FOTO_QUALIDADE);
+    f.marcada=f.marcada||EDITOR.tracos.length>0;
+  }
+  EDITOR=null;
+  fecharModal();
+  renderFotos(momento);
+  showToast('Marcação salva na foto.','success');
+}
+
+/* Envia as fotos de um momento e limpa a área de trabalho. */
+function enviarFotos(registroId, momento){
+  const lista=FOTOS[momento];
+  lista.forEach((f,i)=>PORTARIA.anexarFoto(registroId, momento, f.dataUrl, i, f.marcada));
+  const n=lista.length;
+  FOTOS[momento]=[];
+  renderFotos(momento);
+  return n;
 }
 
 /* ================================================================
@@ -1472,11 +1736,15 @@ function restaurarRascunho(){
   CAMPOS_FORM.forEach(id=>{ if(DB.rascunho[id]!=null) document.getElementById(id).value=DB.rascunho[id]; });
 }
 function limparFormulario(perguntar){
-  if(perguntar && !confirm('Apagar tudo o que foi digitado nesta tela?')) return;
+  if(perguntar){
+    const n=FOTOS.entrada.length;
+    if(!confirm('Apagar tudo o que foi digitado nesta tela'+(n?' e as '+n+' foto(s) anexadas':'')+'?')) return;
+  }
   CAMPOS_FORM.forEach(id=>document.getElementById(id).value='');
   document.getElementById('fTermo').checked=false;
   document.getElementById('boxTermo').classList.remove('ok');
   limparErros();
+  FOTOS.entrada=[]; renderFotos('entrada');
   DB.rascunho=null; dbSalvar();
   agoraNoCampo('fEntrada');
 }
@@ -1576,12 +1844,17 @@ async function salvarEntrada(){
   auditar(r,'ENTRADA LIBERADA','Placa '+placaBonita(placa)+' · autorizado por '+setor+' / '+autorizador+
                                (dup?' · ATENÇÃO: placa já estava dentro ('+dup.numero+')':''));
   r.documento='';
+
+  // As fotos entram na fila depois do registro: elas dependem do id dele.
+  const nFotos=enviarFotos(r.id,'entrada');
+  if(nFotos) auditar(r,'FOTOS ANEXADAS',nFotos+' foto(s) na entrada.');
+  r.temFotos=nFotos>0;
   dbSalvar();
 
   limparFormulario(false);
   renderTudo();
   showToast(provisorio ? ('Entrada registrada neste aparelho — '+r.numero+'\nSerá enviada quando a internet voltar.')
-                       : ('Entrada liberada — '+r.numero),'success');
+                       : ('Entrada liberada — '+r.numero+(nFotos?'\n'+nFotos+' foto(s) sendo enviada(s).':'')),'success');
 }
 
 /* Mesma máscara aplicada pelo servidor, para a tela não "piscar" o
@@ -1614,6 +1887,14 @@ function registrarSaida(id){
       '<label>Anotações da saída</label>'+
       '<textarea id="sObs" placeholder="Alguma observação na saída? (opcional)"></textarea>'+
     '</div>'+
+    '<div class="sec-title">Fotos da saída (opcional)</div>'+
+    '<div class="act-group">'+
+      '<button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById(\'sCam\').click()">Tirar foto</button>'+
+      '<button class="btn btn-outline btn-sm" type="button" onclick="document.getElementById(\'sArq\').click()">Escolher do celular</button>'+
+    '</div>'+
+    '<input type="file" id="sCam" accept="image/*" capture="environment" multiple hidden onchange="adicionarFotos(this,\'saida\')">'+
+    '<input type="file" id="sArq" accept="image/*" multiple hidden onchange="adicionarFotos(this,\'saida\')">'+
+    '<div id="fotosSaida" style="margin-bottom:18px"></div>'+
     (img?'<div class="assin-card"><img src="'+img+'" alt="assinatura"/>'+
          '<div class="who"><div class="k">Porteiro do turno</div><div class="v">'+esc(DB.turno.porteiro)+
          '</div><div class="t">'+esc(DB.turno.turno)+'</div></div></div>':'')+
@@ -1623,8 +1904,10 @@ function registrarSaida(id){
       '<span class="mark"></span>'+
       '<span class="txt">Toque aqui para confirmar</span>'+
     '</label>',
-    [{txt:'Cancelar',cls:'btn-outline',fn:fecharModal},
+    [{txt:'Cancelar',cls:'btn-outline',fn:()=>{ FOTOS.saida=[]; fecharModal(); }},
      {txt:'CONFIRMAR SAÍDA',cls:'btn-green',fn:()=>confirmarSaida(id)}]);
+  FOTOS.saida=[];
+  renderFotos('saida');
 }
 
 function confirmarSaida(id){
@@ -1652,8 +1935,11 @@ function confirmarSaida(id){
   PORTARIA.atualizarRegistro(r);
   auditar(r,'SAÍDA REGISTRADA','Ficou dentro '+duracao(permanenciaMs(r))+(obs?' · '+obs:''));
 
+  const nFotos=enviarFotos(r.id,'saida');
+  if(nFotos){ auditar(r,'FOTOS ANEXADAS',nFotos+' foto(s) na saída.'); r.temFotos=true; dbSalvar(); }
+
   fecharModal(); renderTudo();
-  showToast('Saída registrada — '+r.numero,'success');
+  showToast('Saída registrada — '+r.numero+(nFotos?'\n'+nFotos+' foto(s) sendo enviada(s).':''),'success');
 }
 
 /* Reabertura: registro concluído é travado; só volta a aberto com justificativa. */
@@ -1823,32 +2109,17 @@ function casa(r,q){
          .some(v=>chave(v).includes(t));
 }
 
-function filtroRapido(f){ FILTRO_ABERTOS=f; renderAbertos(); }
-
 function renderAbertos(){
   const q=document.getElementById('buscaAbertos').value;
   const dentro=DB.registros.filter(r=>r.status==='aberto');
-  const cont={ in:0, warn:0, late:0 };
-  dentro.forEach(r=>cont[situacao(r)]++);
-
-  // Painel resumo: números grandes e coloridos, clicáveis como filtro.
-  document.getElementById('resumoAbertos').innerHTML=
-    tileHtml('','t-all',dentro.length,'Total dentro')+
-    tileHtml('in','t-in',cont.in,'Tudo normal')+
-    tileHtml('warn','t-warn',cont.warn,'Verificar')+
-    tileHtml('late','t-late',cont.late,'Resolver');
-
-  const lista=dentro.filter(r=>(!FILTRO_ABERTOS||situacao(r)===FILTRO_ABERTOS) && casa(r,q))
+  const lista=dentro.filter(r=>casa(r,q))
                     .sort((a,b)=>new Date(a.entrada)-new Date(b.entrada));  // mais antigos primeiro
   const el=document.getElementById('listaAbertos');
   el.innerHTML = lista.length
     ? lista.map(r=>cartaoRegistro(r)).join('')
-    : '<div class="empty-state">'+((q||FILTRO_ABERTOS)?'Nada encontrado com esse filtro.':'Nenhum carro dentro da unidade agora.')+'</div>';
-  document.getElementById('pillAbertos').textContent=lista.length+' de '+dentro.length;
-}
-function tileHtml(f,cls,n,lab){
-  return '<button type="button" class="tile '+cls+(FILTRO_ABERTOS===f?' sel':'')+'" onclick="filtroRapido(\''+f+'\')">'+
-           '<div class="num">'+n+'</div><div class="lab">'+esc(lab)+'</div></button>';
+    : '<div class="empty-state">'+(q?'Nada encontrado com esse filtro.':'Ninguém dentro da fábrica agora.')+'</div>';
+  document.getElementById('pillAbertos').textContent=
+    q ? (lista.length+' de '+dentro.length) : (dentro.length+' dentro agora');
 }
 
 function renderConcluidos(){
@@ -1915,11 +2186,8 @@ function renderHistorico(){
 
 function renderContadores(){
   const dentro=DB.registros.filter(r=>r.status==='aberto');
-  const pior = dentro.some(r=>situacao(r)==='late') ? 'late'
-             : dentro.some(r=>situacao(r)==='warn') ? 'warn'
-             : dentro.length ? 'in' : 'zero';
   const a=document.getElementById('nAbertos');
-  a.textContent=dentro.length; a.className='n '+pior;
+  a.textContent=dentro.length; a.className='n '+(dentro.length?'in':'zero');
   const c=document.getElementById('nConcluidos');
   const nc=DB.registros.length-dentro.length;
   c.textContent=nc; c.className='n '+(nc?'out':'zero');
@@ -1995,10 +2263,10 @@ function verRegistro(id){
   const r=DB.registros.find(x=>x.id===id); if(!r) return;
   MODAL_ID=id;
   const s=situacao(r);
-  const caixa={in:'i',warn:'w',late:'e',out:'g'}[s];
+  const caixa={in:'i',out:'g'}[s];
 
   let avisos='<div class="warn-box '+caixa+'"><b>'+esc(ROTULO_SIT[s].toUpperCase())+'</b> — '+
-             (r.status==='aberto'?'dentro há ':'ficou ')+duracao(permanenciaMs(r))+'.</div>';
+             (r.status==='aberto'?'dentro há ':'ficou dentro ')+duracao(permanenciaMs(r))+'.</div>';
   if(r.provisorio) avisos+='<div class="warn-box w">Registro feito sem internet. Ainda não subiu para o servidor, '+
                            'e o número <b>'+esc(r.numero)+'</b> é provisório.</div>';
   if(!integro(r)) avisos+='<div class="warn-box e">Os dados deste registro não conferem com o selo gravado. Verifique o histórico abaixo.</div>';
@@ -2035,6 +2303,8 @@ function verRegistro(id){
     '<div class="sec-title">Confirmações do porteiro</div>'+
     blocoConfirm('Entrada',r.confirmEntrada)+
     blocoConfirm('Saída',r.confirmSaida)+
+    '<div class="sec-title">Fotos</div>'+
+    '<div id="galeria"><div class="foto-vazio">Buscando fotos…</div></div>'+
     '<div class="sec-title">Histórico do registro</div>'+
     '<div id="trilha">'+htmlTrilha(r.auditoria)+'</div>';
 
@@ -2059,6 +2329,49 @@ function verRegistro(id){
       if(alvo && MODAL_ID===id) alvo.innerHTML=htmlTrilha(lista);
     });
   }
+  carregarGaleria(id);
+}
+
+/* Fotos vêm do Storage por URL assinada, válida por 1 hora. */
+async function carregarGaleria(id){
+  const pend=PORTARIA.fotosPendentes(id);
+  let lista=[];
+  try{ lista=await PORTARIA.listarFotos(id); }catch(e){}
+  const alvo=document.getElementById('galeria');
+  if(!alvo || MODAL_ID!==id) return;
+
+  const aviso = pend ? '<div class="warn-box w">'+pend+' foto(s) ainda esperando envio neste aparelho.</div>' : '';
+  if(!lista.length){
+    alvo.innerHTML=aviso+'<div class="foto-vazio">Nenhuma foto anexada a este registro.</div>';
+    return;
+  }
+  const bloco=(momento,rotulo)=>{
+    const fs=lista.filter(f=>f.momento===momento);
+    if(!fs.length) return '';
+    return '<div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'+
+           'color:var(--muted);margin:10px 0 4px">'+rotulo+' ('+fs.length+')</div>'+
+           '<div class="fotos-grid">'+fs.map(f=>
+             '<div class="foto-item">'+
+               (f.marcada?'<span class="marca">marcada</span>':'')+
+               '<img src="'+esc(f.url)+'" alt="foto" onclick="ampliarUrl(\''+esc(f.url)+'\')">'+
+               (souGestor()?'<div class="acoes"><button type="button" class="fbtn" title="Apagar foto" '+
+                 'onclick="removerFotoServidor(\''+f.id+'\',\''+esc(f.caminho)+'\',\''+id+'\')">'+
+                 '<svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>':'')+
+             '</div>').join('')+'</div>';
+  };
+  alvo.innerHTML=aviso+bloco('entrada','Fotos da entrada')+bloco('saida','Fotos da saída');
+}
+
+async function removerFotoServidor(fotoId, caminho, registroId){
+  if(!souGestor()){ showToast('Somente gestores apagam fotos.','error'); return; }
+  if(!confirm('Apagar esta foto para sempre?\n\nEla é evidência do registro e não pode ser recuperada.')) return;
+  try{
+    await PORTARIA.apagarFoto(fotoId, caminho);
+    const r=DB.registros.find(x=>x.id===registroId);
+    if(r) auditar(r,'FOTO APAGADA','Uma foto do registro foi removida pelo gestor.');
+    carregarGaleria(registroId);
+    showToast('Foto apagada.');
+  }catch(e){ showToast(e.message||'Não consegui apagar.','error'); }
 }
 
 function htmlTrilha(lista){
@@ -2132,7 +2445,7 @@ function carregarLogo(){
   im.src=CONFIG.LOGO_URL;
 }
 
-function gerarDeclaracao(id){
+async function gerarDeclaracao(id){
   const r=DB.registros.find(x=>x.id===id); if(!r) return;
   if(!window.jspdf||!window.jspdf.jsPDF){ showToast('Não consegui gerar o PDF (sem internet para carregar a ferramenta).','error'); return; }
   if(r.provisorio && !confirm('Este registro ainda não subiu para o servidor e o número '+r.numero+
@@ -2243,6 +2556,37 @@ function gerarDeclaracao(id){
   }
   termoPDF('CONFERÊNCIA NA ENTRADA', r.confirmEntrada);
   termoPDF('CONFERÊNCIA NA SAÍDA',   r.confirmSaida);
+
+  // ---- Fotos anexadas ----
+  // Baixadas do Storage e embutidas: o PDF precisa ser um arquivo completo,
+  // que continue legível daqui a anos, sem depender de link nem de sessão.
+  let fotos=[];
+  try{ fotos=await PORTARIA.listarFotos(id); }catch(e){}
+  if(fotos.length){
+    showToast('Baixando '+fotos.length+' foto(s) para o PDF…');
+    const LARG=(CW-6)/2, ALT=LARG*0.75;      // duas por linha, proporção 4:3
+    let col=0;
+    doc.addPage(); header(); y=26;
+    doc.setFontSize(8); doc.setFont('helvetica','bold'); setC(RED);
+    doc.text('FOTOS ANEXADAS',ML,y); y+=2;
+    setD(LGRAY); doc.setLineWidth(0.3); doc.line(ML,y,ML+CW,y); y+=5;
+
+    for(let i=0;i<fotos.length;i++){
+      const f=fotos[i];
+      const b64=await PORTARIA.baixarFoto(f.caminho);
+      if(!b64) continue;
+      if(y+ALT+9 > H-16){ doc.addPage(); header(); y=26; col=0; }
+      const x=ML+col*(LARG+6);
+      try{ doc.addImage(b64,'JPEG',x,y,LARG,ALT); }catch(e){ continue; }
+      setD(LGRAY); doc.setLineWidth(0.2); doc.rect(x,y,LARG,ALT);
+      doc.setFontSize(6.8); doc.setFont('helvetica','normal'); setC(GRAY);
+      doc.text((f.momento==='entrada'?'Entrada':'Saída')+' — foto '+(i+1)+
+               (f.marcada?'  (com marcação do porteiro)':''), x, y+ALT+3.4);
+      col++;
+      if(col>1){ col=0; y+=ALT+9; }
+    }
+    if(col>0) y+=ALT+9;
+  }
 
   // ---- Selo de integridade ----
   doc.setFontSize(6.5); doc.setFont('helvetica','italic'); setC(GRAY);
@@ -2433,8 +2777,6 @@ window.addEventListener('DOMContentLoaded',async ()=>{
   document.getElementById('hdrDoc').textContent=CONFIG.DOC_REF;
   document.getElementById('ftDoc').textContent=CONFIG.DOC_REF;
   document.getElementById('txtTermoEntrada').textContent=CONFIG.TERMO_ENTRADA;
-  document.getElementById('lgH1').textContent=CONFIG.ALERTA_PERMANENCIA_H;
-  document.getElementById('lgH2').textContent=CONFIG.CRITICO_PERMANENCIA_H;
 
   carregarLogo();
   preencherSelects();
@@ -2445,6 +2787,7 @@ window.addEventListener('DOMContentLoaded',async ()=>{
 
   CAMPOS_FORM.forEach(id=>document.getElementById(id).addEventListener('input',salvarRascunho));
   PORTARIA.aoMudar(info=>{ renderSync(info); });
+  renderFotos('entrada');
 
   relogio(); setInterval(relogio,1000);
   // Mantém o semáforo de permanência atualizado sem recarregar a página.
