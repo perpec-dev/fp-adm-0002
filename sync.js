@@ -143,6 +143,37 @@ window.PORTARIA = (function(){
     'setor,autorizador,porteiro_entrada,matricula_entrada,turno_entrada,porteiro_saida,matricula_saida,'+
     'turno_saida,observacoes,confirm_entrada,confirm_saida,selo,criado_em,atualizado_em';
 
+  /* ---------------- ronda: tela <-> banco ---------------- */
+  function paraBancoRonda(r){
+    return {
+      id:r.id, numero:r.numero, provisorio:!!r.provisorio, status:r.status,
+      inicio:r.inicio, fim:r.fim||null,
+      porteiro:r.porteiro, matricula:r.matricula, turno:r.turno||null,
+      confirm:r.confirm||null, selo:r.selo||null
+    };
+  }
+  function rondaDoBanco(x){
+    return {
+      id:x.id, numero:x.numero, provisorio:!!x.provisorio, status:x.status,
+      inicio:x.inicio, fim:x.fim,
+      porteiro:x.porteiro, matricula:x.matricula, turno:x.turno||'',
+      confirm:x.confirm, selo:x.selo||'',
+      criadoEm:x.criado_em, atualizadoEm:x.atualizado_em,
+      observacoes:null              // penduradas depois, por rondaId
+    };
+  }
+  function paraBancoObs(o){
+    return { id:o.id, ronda_id:o.rondaId, ordem:o.ordem||0,
+             local:o.local, descricao:o.descricao, ts:o.ts };
+  }
+  function obsDoBanco(o){
+    return { id:o.id, rondaId:o.ronda_id, ordem:o.ordem, local:o.local,
+             descricao:o.descricao, ts:o.ts, criadoEm:o.criado_em };
+  }
+  const COLUNAS_RONDA='id,numero,provisorio,status,inicio,fim,porteiro,matricula,turno,'+
+                      'confirm,selo,criado_em,atualizado_em';
+  const COLUNAS_OBS  ='id,ronda_id,ordem,local,descricao,ts,criado_em';
+
   function perfilDoBanco(p){
     return { id:p.id, matricula:p.matricula, nome:p.nome, papel:p.papel,
              assinatura:p.assinatura||'', ativo:!!p.ativo, criadoEm:p.criado_em };
@@ -288,15 +319,21 @@ window.PORTARIA = (function(){
     if(!sb || !perfil) return null;
     setEstado('sincronizando');
     try{
-      const [reg, pfs] = await Promise.all([
+      const [reg, pfs, rnd, obs] = await Promise.all([
         sb.from('registros').select(COLUNAS).order('entrada',{ascending:false}).limit(5000),
-        sb.from('perfis').select(COLUNAS_PERFIL).order('matricula')
+        sb.from('perfis').select(COLUNAS_PERFIL).order('matricula'),
+        sb.from('rondas').select(COLUNAS_RONDA).order('inicio',{ascending:false}).limit(2000),
+        sb.from('observacoes').select(COLUNAS_OBS).order('ronda_id').order('ordem').limit(20000)
       ]);
       if(reg.error) throw reg.error;
       if(pfs.error) throw pfs.error;
+      if(rnd.error) throw rnd.error;
+      if(obs.error) throw obs.error;
       localStorage.setItem(CHAVE_SYNC, new Date().toISOString());
       setEstado('ok');
-      return { registros:reg.data.map(doBanco), perfis:pfs.data.map(perfilDoBanco), completo:true };
+      return { registros:reg.data.map(doBanco), perfis:pfs.data.map(perfilDoBanco),
+               rondas:rnd.data.map(rondaDoBanco), observacoes:obs.data.map(obsDoBanco),
+               completo:true };
     }catch(e){
       setEstado('offline', e.message||'Sem conexão');
       return null;
@@ -308,12 +345,23 @@ window.PORTARIA = (function(){
     const desde = localStorage.getItem(CHAVE_SYNC);
     if(!desde) return puxarTudo();
     try{
-      const { data, error } = await sb.from('registros').select(COLUNAS)
-        .gt('atualizado_em', desde).order('atualizado_em',{ascending:true}).limit(1000);
-      if(error) throw error;
+      // Observação não tem "atualizado_em" porque nunca é editada: o
+      // critério é quando ela chegou ao servidor.
+      const [reg, rnd, obs] = await Promise.all([
+        sb.from('registros').select(COLUNAS)
+          .gt('atualizado_em', desde).order('atualizado_em',{ascending:true}).limit(1000),
+        sb.from('rondas').select(COLUNAS_RONDA)
+          .gt('atualizado_em', desde).order('atualizado_em',{ascending:true}).limit(1000),
+        sb.from('observacoes').select(COLUNAS_OBS)
+          .gt('criado_em', desde).order('criado_em',{ascending:true}).limit(5000)
+      ]);
+      if(reg.error) throw reg.error;
+      if(rnd.error) throw rnd.error;
+      if(obs.error) throw obs.error;
       localStorage.setItem(CHAVE_SYNC, new Date().toISOString());
       if(estado!=='ok') setEstado('ok');
-      return { registros:data.map(doBanco), completo:false };
+      return { registros:reg.data.map(doBanco), rondas:rnd.data.map(rondaDoBanco),
+               observacoes:obs.data.map(obsDoBanco), completo:false };
     }catch(e){
       setEstado('offline', e.message||'Sem conexão');
       return null;
@@ -334,6 +382,12 @@ window.PORTARIA = (function(){
   async function numeroNovo(){
     if(!sb) return null;
     const { data, error } = await sb.rpc('proximo_numero');
+    if(error) return null;
+    return data;
+  }
+  async function numeroNovoRonda(){
+    if(!sb) return null;
+    const { data, error } = await sb.rpc('proximo_numero_ronda');
     if(error) return null;
     return data;
   }
@@ -382,17 +436,64 @@ window.PORTARIA = (function(){
     return true;
   }
 
+  /* ---------------- fotos de observação de ronda ----------------
+     Mesmo bucket e mesma tabela das fotos de veículo; muda o dono da
+     foto (observacao_id em vez de registro_id) e a pasta no Storage. */
+  async function anexarFotoObs(rondaId, obsId, dataUrl, ordem, marcada){
+    const fotoId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+                 : 'f'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+    await fotoGuardar(fotoId, dataUrl);
+    enfileirar('foto_obs_upload', { fotoId, rondaId, obsId, ordem:ordem||0, marcada:!!marcada });
+    descarregar();
+    return fotoId;
+  }
+
+  /* Todas as fotos das observações de uma ronda, agrupadas por observação. */
+  async function listarFotosDaRonda(obsIds){
+    if(!sb || !perfil || !obsIds || !obsIds.length) return {};
+    const { data, error } = await sb.from('fotos')
+      .select('id,observacao_id,caminho,ordem,marcada,criado_em')
+      .in('observacao_id', obsIds).order('ordem');
+    if(error || !data || !data.length) return {};
+
+    const { data:urls } = await sb.storage.from('fotos')
+      .createSignedUrls(data.map(f=>f.caminho), 3600);
+    const porCaminho={};
+    (urls||[]).forEach(u=>{ if(u && u.path) porCaminho[u.path]=u.signedUrl; });
+
+    const porObs={};
+    data.forEach(f=>{
+      (porObs[f.observacao_id] = porObs[f.observacao_id] || []).push({
+        id:f.id, caminho:f.caminho, ordem:f.ordem, marcada:f.marcada,
+        url:porCaminho[f.caminho]||''
+      });
+    });
+    return porObs;
+  }
+
   /* Quantas fotos ainda não subiram (para a tela avisar). */
   function fotosPendentes(registroId){
     return fila().filter(i=>i.tipo==='foto_upload' &&
       (!registroId || i.payload.registroId===registroId)).length;
   }
+  function fotosRondaPendentes(rondaId){
+    return fila().filter(i=>i.tipo==='foto_obs_upload' &&
+      (!rondaId || i.payload.rondaId===rondaId)).length;
+  }
 
   function criarRegistro(r){   enfileirar('reg_insert', r);        return descarregar(); }
   function atualizarRegistro(r){ enfileirar('reg_update', r);      return descarregar(); }
   function apagarRegistro(id){ enfileirar('reg_delete', {id});     return descarregar(); }
+  function criarRonda(r){      enfileirar('ronda_insert', r);      return descarregar(); }
+  function atualizarRonda(r){  enfileirar('ronda_update', r);      return descarregar(); }
+  function criarObservacao(o){ enfileirar('obs_insert', o);        return descarregar(); }
   function auditar(registroId, evento, detalhe){
     enfileirar('aud_insert', { registro_id:registroId, evento, detalhe:detalhe||'',
+                               autor:(perfil&&perfil.nome)||'—', matricula:(perfil&&perfil.matricula)||null });
+    return descarregar();
+  }
+  function auditarRonda(rondaId, evento, detalhe){
+    enfileirar('aud_insert', { ronda_id:rondaId, evento, detalhe:detalhe||'',
                                autor:(perfil&&perfil.nome)||'—', matricula:(perfil&&perfil.matricula)||null });
     return descarregar();
   }
@@ -447,7 +548,7 @@ window.PORTARIA = (function(){
       if(r.provisorio){
         const n=await numeroNovo();
         if(!n) throw new Error('network: sem numeração');
-        mudouNumero.push({ id:r.id, de:r.numero, para:n });
+        mudouNumero.push({ tipo:'registro', id:r.id, de:r.numero, para:n });
         r.numero=n; r.provisorio=false;
         // O número entra no selo. Trocar o provisório pelo definitivo sem
         // re-selar faria o registro nascer no servidor já "adulterado".
@@ -473,9 +574,55 @@ window.PORTARIA = (function(){
       const { error } = await sb.from('registros').delete().eq('id', item.payload.id);
       if(error) throw error;
     }
+    else if(item.tipo==='ronda_insert'){
+      const r={...item.payload};
+      // Ronda aberta sem internet recebe o número definitivo só agora.
+      if(r.provisorio){
+        const n=await numeroNovoRonda();
+        if(!n) throw new Error('network: sem numeração');
+        mudouNumero.push({ tipo:'ronda', id:r.id, de:r.numero, para:n });
+        r.numero=n; r.provisorio=false;
+        if(typeof window.selarRonda==='function') window.selarRonda(r);
+      }
+      const { error } = await sb.from('rondas').insert(paraBancoRonda(r));
+      if(error) throw error;
+    }
+    else if(item.tipo==='ronda_update'){
+      const b=paraBancoRonda(item.payload);
+      const id=b.id;
+      // Numeração é do servidor; início e matrícula não mudam depois de
+      // aberta (o banco nem concede permissão para essas colunas).
+      delete b.id; delete b.numero; delete b.provisorio;
+      delete b.inicio; delete b.porteiro; delete b.matricula;
+      const { error } = await sb.from('rondas').update(b).eq('id', id);
+      if(error) throw error;
+    }
+    else if(item.tipo==='obs_insert'){
+      const { error } = await sb.from('observacoes').insert(paraBancoObs(item.payload));
+      if(error && !/duplicate|unique/i.test(error.message||'')) throw error;
+    }
     else if(item.tipo==='aud_insert'){
       const { error } = await sb.from('auditoria').insert(item.payload);
       if(error) throw error;
+    }
+    else if(item.tipo==='foto_obs_upload'){
+      const p=item.payload;
+      const dataUrl=await fotoLer(p.fotoId);
+      if(!dataUrl){
+        const e=new Error('Foto não está mais neste aparelho.'); e.code='foto_ausente'; throw e;
+      }
+      const caminho = 'rondas/'+p.rondaId+'/'+p.obsId+'-'+String(p.ordem).padStart(2,'0')+'-'+p.fotoId+'.jpg';
+      const { error:eUp } = await sb.storage.from('fotos')
+        .upload(caminho, dataUrlParaBlob(dataUrl), { contentType:'image/jpeg', upsert:false });
+      if(eUp && !/exists|duplicate/i.test(eUp.message||'')) throw eUp;
+
+      const { error:eIns } = await sb.from('fotos').insert({
+        id:p.fotoId, observacao_id:p.obsId, momento:'observacao',
+        caminho, ordem:p.ordem, marcada:!!p.marcada
+      });
+      if(eIns && !/duplicate|unique/i.test(eIns.message||'')) throw eIns;
+
+      await fotoRemover(p.fotoId);
     }
     else if(item.tipo==='foto_upload'){
       const p=item.payload;
@@ -599,8 +746,10 @@ window.PORTARIA = (function(){
     iniciar, entrar, sair, trocarSenha, emailDeMatricula,
     puxarTudo, puxarNovidades, carregarAuditoria,
     criarRegistro, atualizarRegistro, apagarRegistro, auditar,
+    criarRonda, atualizarRonda, criarObservacao, auditarRonda,
     anexarFoto, listarFotos, baixarFoto, apagarFoto, fotosPendentes,
-    descarregar, numeroNovo,
+    anexarFotoObs, listarFotosDaRonda, fotosRondaPendentes,
+    descarregar, numeroNovo, numeroNovoRonda,
     criarPorteiro, salvarPerfil, apagarPerfil,
     revelarDocumento, anonimizarAntigos,
     ligarSondagem, desligarSondagem,

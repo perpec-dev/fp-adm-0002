@@ -1,8 +1,15 @@
-# Controle de Entrada de Veículos — Portaria
+# Portaria — Controle de Entrada de Veículos e Ronda
 
-**FP-ADM-0002 RevForm.01** · Perpec Oilfield Supply
+**FP-ADM-0002 RevForm.01** (entrada de veículos) · **FP-ADM-0003 RevForm.01** (ronda)
+Perpec Oilfield Supply
 
-Aplicação de portaria para registrar a entrada e a saída de pessoas e veículos na unidade.
+Aplicação de portaria com **dois módulos**, escolhidos numa tela inicial logo depois do login:
+
+| Módulo | Para quê |
+|---|---|
+| **Controle de Entrada de Veículos** | Liberar entrada, registrar saída, consultar quem está dentro |
+| **Ronda** | Percorrer a unidade e registrar o que estiver fora do normal |
+
 A tela é uma página estática (GitHub Pages) e os dados ficam num banco compartilhado
 (Supabase): **o mesmo histórico aparece no PC da portaria, no celular e no tablet**.
 O acesso exige matrícula e senha.
@@ -14,6 +21,7 @@ O acesso exige matrícula e senha.
 - [Arquivos](#arquivos)
 - [Instalação](#instalação) ← **primeira vez, faça isto**
 - [Como usar no dia a dia](#como-usar-no-dia-a-dia)
+- [Ronda](#ronda)
 - [Código de cores](#código-de-cores)
 - [Fotos](#fotos)
 - [Armazenamento](#armazenamento) ← **leia esta parte**
@@ -61,6 +69,10 @@ Em [supabase.com](https://supabase.com), crie um projeto. Escolha a região
 
 **2. Criar as tabelas e as regras**
 No painel: `SQL Editor` → `New query` → cole o conteúdo de `supabase-schema.sql` → `Run`.
+
+> **Já tem o banco criado?** Rode o arquivo inteiro de novo assim que atualizar a aplicação.
+> Ele é feito para ser reexecutado (`if not exists` / `drop ... if exists`) e é ele que cria as
+> tabelas novas de cada versão. **Sem isso, o módulo de Ronda não grava nada.**
 
 **3. Desligar a confirmação de e-mail**
 Em `Authentication` → `Providers` → `Email`, desligue **Confirm email**. O login é por
@@ -171,6 +183,64 @@ anotações opcionais e confirme. O registro passa para **Já saíram**.
 
 ---
 
+## Ronda
+
+Uma ronda é **um único registro** que dura do começo ao fim da inspeção. Dentro dela vão os
+*packs de observação* — um para cada situação fora do normal. **O porteiro não registra os
+pontos que estavam certos**: só o que merece registro.
+
+### Fluxo
+
+```
+Login → tela inicial → Ronda
+   │
+   ├─ COMEÇAR RONDA          (hora e porteiro anotados automaticamente)
+   │
+   ├─ Registrar observação    passo 1 Onde foi
+   │                          passo 2 O que você viu
+   │                          passo 3 Fotos (opcional)
+   │                          passo 4 Salvar e continuar  ou  Salvar e finalizar
+   │        └── continuar → volta ao painel da ronda, pronto para a próxima
+   │
+   └─ FINALIZAR RONDA        (hora do fim anotada, assinatura do porteiro)
+              └── vai para Rondas feitas → relatório em PDF
+```
+
+Cada passo mostra **uma coisa por tela**, com botões grandes. O passo só avança depois que o
+campo obrigatório daquela tela está preenchido, e a mensagem de erro diz exatamente o que falta.
+
+### Ronda sem nenhuma ocorrência
+
+É resultado válido e esperado. O botão **FINALIZAR RONDA** fica no painel desde o começo: se o
+porteiro percorreu tudo e não achou nada, finaliza sem registrar observação nenhuma. O relatório
+sai dizendo isso com todas as letras.
+
+### Sair no meio e voltar depois
+
+A ronda aberta **fica guardada** no servidor e neste aparelho. Fechar o aplicativo, recarregar a
+página ou trocar de aparelho não perde nada: ao voltar, a mesma ronda continua em andamento, com
+as observações já salvas. O texto de uma observação em preenchimento também é guardado a cada
+tecla — só as **fotos ainda não salvas** se perdem (veja [Limitações](#limitações-conhecidas)).
+
+### O turno não fecha com ronda aberta
+
+Ao tentar **Encerrar turno** com uma ronda em andamento, o sistema recusa e leva o porteiro para
+a ronda. Uma ronda sem hora de término e sem assinatura não serve como evidência, então ela é
+obrigação do turno em que foi começada.
+
+### Histórico e relatório
+
+A aba **Rondas feitas** lista todas as rondas, com filtro por período, por situação e por texto
+(número, porteiro, local ou descrição de qualquer observação). Ao abrir uma ronda aparecem os
+dados, todas as observações e as fotos de cada uma.
+
+O botão **Gerar relatório** produz um PDF com a identificação da ronda, o porteiro responsável,
+início, fim, duração e, para cada observação, o local, a hora, a descrição e as fotos daquela
+observação — as imagens ficam junto do texto que explica o que elas mostram. No fim, o termo
+assinado pelo porteiro, com a assinatura desenhada do cadastro dele.
+
+---
+
 ## Código de cores
 
 Uma cor tem sempre o mesmo significado — na tela, na tabela e nos contadores:
@@ -243,21 +313,31 @@ janela anônima não perde nada — na próxima entrada com matrícula e senha t
 | Tabela | Conteúdo |
 |---|---|
 | `perfis` | Porteiros e gestores: matrícula, nome, perfil, assinatura, ativo |
-| `registros` | Entradas e saídas |
+| `registros` | Entradas e saídas de veículo |
+| `rondas` | Uma linha por ronda: início, fim, porteiro, turno, assinatura |
+| `observacoes` | Packs de observação. Cada um pertence a uma ronda (`ronda_id`) |
 | `fotos` | Caminho e dono de cada foto. A imagem fica no bucket `fotos` do Storage |
 | `auditoria` | Histórico de eventos. Só cresce: a API não tem permissão de alterar nem apagar |
-| `contadores` | Numeração sequencial por ano. Nenhum usuário acessa direto |
+| `contadores`, `contadores_ronda` | Numeração sequencial por ano. Nenhum usuário acessa direto |
 
 Cada registro é uma linha com colunas próprias (`pessoa`, `placa`, `entrada`, `saida`,
 `setor`, `autorizador`, `matricula_entrada`, …), não um bloco de texto. Datas são gravadas
 em UTC (`timestamptz`) e exibidas no fuso do aparelho.
 
+A tabela `fotos` serve aos dois módulos. Cada foto pertence **a um só dono** — ou a um registro
+de veículo (`registro_id`), ou a uma observação de ronda (`observacao_id`), nunca aos dois e
+nunca a nenhum. Uma restrição no banco garante isso; não depende do aplicativo acertar.
+
+`observacoes` **não tem permissão de UPDATE**: observação registrada é evidência. Corrigir
+significa registrar outra, não reescrever a anterior.
+
 ### Numeração
 
-O número (`PORT-2026-0042`) é gerado **pelo servidor**, pela função `proximo_numero()`, que
-incrementa um contador dentro da mesma transação. Dois aparelhos registrando ao mesmo tempo
-nunca recebem o mesmo número — problema que não teria solução se a numeração fosse feita em
-cada aparelho.
+O número (`PORT-2026-0042` para entrada, `RND-2026-0007` para ronda) é gerado **pelo servidor**,
+pelas funções `proximo_numero()` e `proximo_numero_ronda()`, que incrementam um contador dentro
+da mesma transação. Dois aparelhos registrando ao mesmo tempo nunca recebem o mesmo número —
+problema que não teria solução se a numeração fosse feita em cada aparelho. As duas séries têm
+contadores separados para não se misturarem.
 
 ### Trabalhando sem internet
 
@@ -468,18 +548,22 @@ O GitHub Pages e o navegador guardam cache. Espere um ou dois minutos e recarreg
 
 ## Limitações conhecidas
 
-- **Um computador, uma base.** Não há sincronização automática entre máquinas. Duas
-  portarias funcionando ao mesmo tempo precisam de bases separadas, consolidadas depois
-  por restauração de backup.
-- **Sem controle de acesso.** Quem senta na máquina usa o sistema. A identificação por
-  matrícula registra *quem declarou* ser o porteiro, mas não autentica (não há senha).
-  O controle é físico e disciplinar.
+- **Fotos ainda não salvas se perdem.** Enquanto uma observação de ronda (ou uma entrada) está
+  sendo preenchida, as fotos ficam só na memória da página. O **texto** é rascunhado a cada
+  tecla e sobrevive a fechar o aplicativo; as fotos, não — elas só ficam guardadas depois de
+  *Salvar a observação* (ou *Liberar entrada*). A tela avisa isso no passo das fotos.
 - **PDF exige internet** na primeira geração da sessão, para carregar as bibliotecas do CDN.
-- **Limite de ~5 MB** do `localStorage`. Suficiente para alguns milhares de registros;
-  acompanhe o indicador de espaço na aba Histórico.
-- **Dados pessoais (LGPD).** A aplicação armazena nome, documento e placa de visitantes.
-  Trate a máquina da portaria e os arquivos de backup como material controlado, e defina
-  um prazo de descarte para os registros antigos.
+  Sem conexão, o botão avisa em vez de gerar um arquivo quebrado.
+- **Sem internet, a numeração é provisória.** Registros e rondas criados offline recebem um
+  número `P###` e só ganham o definitivo ao sincronizar. Um PDF gerado antes disso fica com o
+  número velho — a tela avisa antes de gerar.
+- **Limite de ~5 MB** do `localStorage` para a cópia local. Se encher, o servidor continua
+  intacto: perde-se só o cache. Acompanhe o indicador de espaço na aba Histórico.
+- **Sondagem a cada 30 s**, não tempo real. Uma alteração feita em outro aparelho aparece na
+  próxima sondagem, ao voltar o foco da janela ou pelo botão *Atualizar agora*.
+- **Dados pessoais (LGPD).** A aplicação armazena nome, documento e placa de visitantes. O
+  documento tem proteção extra (veja [Segurança](#segurança)), mas o restante não. Defina um
+  prazo de descarte e use *Descartar documentos antigos* na aba Histórico.
 
 ---
 

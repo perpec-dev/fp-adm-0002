@@ -459,6 +459,214 @@ create policy fotos_obj_apagar on storage.objects for delete to authenticated
 
 
 -- =====================================================================
+-- 9c. RONDA  — inspeção do porteiro pela unidade
+-- ---------------------------------------------------------------------
+-- Uma ronda é UM registro que dura do início ao fim da inspeção e pode
+-- conter vários "packs de observação". O porteiro só registra o que está
+-- fora do normal: ronda sem nenhuma observação é resultado válido.
+--
+-- Este bloco é acrescentado depois e altera a tabela "fotos", que passa a
+-- servir aos dois módulos. Pode ser rodado em banco já em uso: tudo é
+-- "if not exists" / "drop ... if exists".
+-- =====================================================================
+create table if not exists public.rondas (
+  id             uuid primary key default gen_random_uuid(),
+  numero         text not null unique,
+  provisorio     boolean not null default false,  -- criada offline, numeração ainda não definitiva
+  status         text not null default 'aberta' check (status in ('aberta','concluida')),
+
+  inicio         timestamptz not null,
+  fim            timestamptz,
+
+  porteiro       text not null,
+  matricula      text not null,
+  turno          text,
+
+  confirm        jsonb,        -- quem assinou o relatório: nome, matrícula, termo, assinatura
+  selo           text,
+
+  criado_em      timestamptz not null default now(),
+  criado_por     uuid not null default auth.uid(),
+  atualizado_em  timestamptz not null default now(),
+  atualizado_por uuid not null default auth.uid(),
+
+  constraint fim_depois_do_inicio check (fim is null or fim >= inicio)
+);
+
+create index if not exists rondas_inicio_idx     on public.rondas (inicio desc);
+create index if not exists rondas_status_idx     on public.rondas (status);
+create index if not exists rondas_matricula_idx  on public.rondas (matricula);
+create index if not exists rondas_atualizado_idx on public.rondas (atualizado_em desc);
+
+comment on table public.rondas is
+  'Uma ronda por inspeção. Fica aberta até o porteiro finalizar; as observações penduram nela.';
+
+-- Pack de observação: o que o porteiro encontrou fora do normal.
+create table if not exists public.observacoes (
+  id          uuid primary key default gen_random_uuid(),
+  ronda_id    uuid not null references public.rondas(id) on delete cascade,
+  ordem       integer not null default 0,
+  local       text not null check (char_length(btrim(local)) >= 2),
+  descricao   text not null check (char_length(btrim(descricao)) >= 3),
+  ts          timestamptz not null,          -- quando o porteiro registrou
+  criado_em   timestamptz not null default now(),
+  criado_por  uuid not null default auth.uid()
+);
+
+create index if not exists observacoes_ronda_idx on public.observacoes (ronda_id, ordem);
+
+comment on table public.observacoes is
+  'Pack de observação de uma ronda: onde, o quê, quando. As fotos ficam em public.fotos.';
+
+
+-- ---------------------------------------------------------------------
+-- A tabela "fotos" passa a atender entrada/saída DE VEÍCULO e observação
+-- DE RONDA. Cada foto pertence a um só dos dois — nunca aos dois, nunca
+-- a nenhum.
+-- ---------------------------------------------------------------------
+alter table public.fotos alter column registro_id drop not null;
+alter table public.fotos add column if not exists observacao_id uuid
+  references public.observacoes(id) on delete cascade;
+
+create index if not exists fotos_observacao_idx on public.fotos (observacao_id, ordem);
+
+alter table public.fotos drop constraint if exists fotos_momento_check;
+alter table public.fotos add constraint fotos_momento_check
+  check (momento in ('entrada','saida','observacao'));
+
+alter table public.fotos drop constraint if exists foto_tem_um_dono;
+alter table public.fotos add constraint foto_tem_um_dono check (
+  (registro_id is not null and observacao_id is null) or
+  (registro_id is null     and observacao_id is not null)
+);
+
+-- A trilha de auditoria passa a aceitar eventos de ronda.
+alter table public.auditoria add column if not exists ronda_id uuid
+  references public.rondas(id) on delete cascade;
+
+
+-- ---------------------------------------------------------------------
+-- Numeração das rondas — mesma ideia da numeração dos registros, contador
+-- próprio para as duas séries não se misturarem.
+-- ---------------------------------------------------------------------
+create table if not exists public.contadores_ronda (
+  ano    integer primary key,
+  ultimo integer not null default 0
+);
+
+create or replace function public.proximo_numero_ronda()
+returns text language plpgsql security definer set search_path = public as $$
+declare
+  v_ano integer := extract(year from now() at time zone 'America/Sao_Paulo');
+  v_n   integer;
+begin
+  if not public.sou_ativo() then
+    raise exception 'Usuário sem permissão.';
+  end if;
+
+  insert into public.contadores_ronda (ano, ultimo) values (v_ano, 1)
+    on conflict (ano) do update set ultimo = public.contadores_ronda.ultimo + 1
+    returning ultimo into v_n;
+
+  return 'RND-' || v_ano || '-' || lpad(v_n::text, 4, '0');
+end $$;
+
+-- Os gatilhos genéricos servem: rondas tem as mesmas colunas de carimbo
+-- e o mesmo par numero/provisorio dos registros.
+drop trigger if exists rondas_carimbo on public.rondas;
+create trigger rondas_carimbo before update on public.rondas
+  for each row execute function public.tg_carimbo();
+
+drop trigger if exists rondas_numero on public.rondas;
+create trigger rondas_numero before update on public.rondas
+  for each row execute function public.tg_numero_imutavel();
+
+
+-- ---------------------------------------------------------------------
+-- Permissões de coluna
+-- ---------------------------------------------------------------------
+revoke all on public.rondas, public.observacoes, public.contadores_ronda
+  from anon, authenticated;
+
+grant select (id, numero, provisorio, status, inicio, fim, porteiro, matricula, turno,
+              confirm, selo, criado_em, criado_por, atualizado_em, atualizado_por)
+  on public.rondas to authenticated;
+grant insert (id, numero, provisorio, status, inicio, fim, porteiro, matricula, turno, confirm, selo)
+  on public.rondas to authenticated;
+-- Sem "inicio" e sem "matricula": quem abriu a ronda e quando não se altera depois.
+grant update (numero, provisorio, status, fim, turno, confirm, selo)
+  on public.rondas to authenticated;
+grant delete on public.rondas to authenticated;
+
+grant select (id, ronda_id, ordem, local, descricao, ts, criado_em, criado_por)
+  on public.observacoes to authenticated;
+grant insert (id, ronda_id, ordem, local, descricao, ts)
+  on public.observacoes to authenticated;
+-- Sem UPDATE: observação registrada é evidência. Corrigir = registrar outra.
+grant delete on public.observacoes to authenticated;
+
+grant select (observacao_id) on public.fotos to authenticated;
+grant insert (observacao_id) on public.fotos to authenticated;
+grant select (ronda_id) on public.auditoria to authenticated;
+grant insert (ronda_id) on public.auditoria to authenticated;
+
+grant execute on function public.proximo_numero_ronda() to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- Row Level Security
+-- ---------------------------------------------------------------------
+alter table public.rondas           enable row level security;
+alter table public.observacoes      enable row level security;
+alter table public.contadores_ronda enable row level security;
+-- contadores_ronda: RLS ligada e nenhuma política = só a função chega nela.
+
+drop policy if exists ronda_ler     on public.rondas;
+drop policy if exists ronda_criar   on public.rondas;
+drop policy if exists ronda_alterar on public.rondas;
+drop policy if exists ronda_apagar  on public.rondas;
+
+create policy ronda_ler on public.rondas for select to authenticated
+  using (public.sou_ativo());
+
+-- O porteiro só abre ronda em seu próprio nome.
+create policy ronda_criar on public.rondas for insert to authenticated
+  with check (public.sou_ativo() and matricula = public.minha_matricula());
+
+-- Quem abriu é quem finaliza. Gestor pode intervir.
+create policy ronda_alterar on public.rondas for update to authenticated
+  using      (public.sou_ativo() and (public.sou_gestor() or matricula = public.minha_matricula()))
+  with check (public.sou_ativo() and (public.sou_gestor() or matricula = public.minha_matricula()));
+
+create policy ronda_apagar on public.rondas for delete to authenticated
+  using (public.sou_gestor());
+
+drop policy if exists obs_ler    on public.observacoes;
+drop policy if exists obs_criar  on public.observacoes;
+drop policy if exists obs_apagar on public.observacoes;
+
+create policy obs_ler on public.observacoes for select to authenticated
+  using (public.sou_ativo());
+
+-- Deliberadamente NÃO exige que a ronda ainda esteja aberta: uma ronda
+-- feita sem internet sobe depois, e a fila pode entregar a finalização
+-- antes de uma observação. Recusar aqui perderia o registro de campo.
+-- O que aconteceu de fato fica em observacoes.ts (quando o porteiro
+-- registrou) e criado_em (quando chegou ao servidor).
+create policy obs_criar on public.observacoes for insert to authenticated
+  with check (
+    public.sou_ativo() and exists (
+      select 1 from public.rondas r
+       where r.id = ronda_id
+         and (public.sou_gestor() or r.matricula = public.minha_matricula())
+    )
+  );
+
+create policy obs_apagar on public.observacoes for delete to authenticated
+  using (public.sou_gestor());
+
+
+-- =====================================================================
 -- 10. DESCARTE DE DADOS (LGPD)
 --     Apaga o documento de visitantes de registros antigos, mantendo o
 --     restante do histórico. Rode manualmente ou agende em

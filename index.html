@@ -65,7 +65,15 @@
     // Texto do termo confirmado pelo porteiro na SAÍDA
     TERMO_SAIDA:
       "Confirmo que acompanhei a saída da pessoa e do carro, que não há material ou equipamento " +
-      "saindo sem autorização e que o horário de saída está certo."
+      "saindo sem autorização e que o horário de saída está certo.",
+
+    // Texto assinado pelo porteiro ao FINALIZAR A RONDA
+    TERMO_RONDA:
+      "Confirmo que percorri a unidade no horário indicado e que as observações registradas " +
+      "acima são tudo o que encontrei fora do normal durante esta ronda.",
+
+    // Documento gerado pela ronda (o da portaria fica em DOC_REF)
+    DOC_REF_RONDA: "FP-ADM-0003 RevForm.01"
   };
 </script>
 
@@ -209,6 +217,10 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(
    visível — evita a rolagem infinita que amontoava tudo no celular. */
 .card[data-passo]{display:none}
 .card[data-passo].on{display:block}
+/* O pack de observação da ronda usa o mesmo padrão, com atributo próprio
+   para as duas etapas não se confundirem na mesma página. */
+.card[data-pk]{display:none}
+.card[data-pk].on{display:block}
 .passos{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
         padding:12px 14px;margin-bottom:1.1rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
 .passos-top{display:flex;align-items:baseline;gap:10px;margin-bottom:9px;flex-wrap:wrap}
@@ -224,8 +236,93 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(
 .nav-passos .btn{width:100%}
 @media(max-width:600px){.nav-passos{grid-template-columns:1fr 1fr}}
 
+/* ====== TELA INICIAL: ESCOLHA DO MÓDULO ======
+   Duas portas grandes. É a primeira coisa depois do login e precisa ser
+   legível de relance, com o polegar, na guarita. */
+.hub{max-width:760px;margin:0 auto;padding:2rem 1rem 4rem}
+.hub h1{font-size:19px;font-weight:800;color:var(--dark);text-align:center}
+.hub .sub{font-size:13.5px;color:var(--muted);text-align:center;margin:8px 0 1.8rem;line-height:1.5}
+.hub-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.hub-grid{grid-template-columns:1fr}.hub{padding:1.2rem .8rem 4rem}}
+.hub-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-lg);
+          padding:1.6rem 1.3rem;text-align:left;cursor:pointer;font-family:inherit;
+          transition:border-color .14s,box-shadow .14s,transform .14s;box-shadow:0 1px 3px rgba(0,0,0,.05);
+          display:flex;flex-direction:column;gap:10px;min-height:180px}
+.hub-card:hover{border-color:var(--red);box-shadow:0 8px 22px rgba(0,0,0,.11);transform:translateY(-2px)}
+.hub-card .ico{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.hub-card .ico svg{width:27px;height:27px;fill:none;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.hub-card.v .ico{background:var(--st-in-bg);border:1.5px solid var(--st-in-bd)}
+.hub-card.v .ico svg{stroke:var(--st-in)}
+.hub-card.r .ico{background:var(--accent-lt);border:1.5px solid var(--st-late-bd)}
+.hub-card.r .ico svg{stroke:var(--red)}
+.hub-card .tt{font-size:16.5px;font-weight:800;color:var(--dark);line-height:1.25}
+.hub-card .ds{font-size:13px;color:var(--muted);line-height:1.5}
+.hub-card .st{margin-top:auto;font-size:12.5px;font-weight:800;letter-spacing:.02em}
+.hub-card .st.aberta{color:var(--red)}
+.hub-card .st.livre{color:var(--muted);font-weight:700}
+.hub-volta{background:none;border:none;font-family:inherit;font-size:12.5px;font-weight:700;
+           color:#D8CCCC;cursor:pointer;padding:0;display:inline-flex;align-items:center;gap:5px}
+.hub-volta:hover{color:#fff}
+.hub-volta svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+
+/* ====== RONDA ====== */
+.ronda-hero{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-lg);
+            padding:1.6rem 1.3rem;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.05);margin-bottom:1.1rem}
+.ronda-hero h2{font-size:17px;font-weight:800;color:var(--dark);margin-bottom:8px}
+.ronda-hero p{font-size:13.5px;color:var(--muted);line-height:1.55;margin-bottom:1.2rem;
+              max-width:460px;margin-left:auto;margin-right:auto}
+.ronda-faixa{background:var(--st-late-bg);border:1.5px solid var(--st-late-bd);border-radius:var(--radius-lg);
+             padding:12px 15px;margin-bottom:1.1rem;display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+.ronda-faixa .pulso{width:11px;height:11px;border-radius:50%;background:var(--red);flex-shrink:0;
+                    animation:pulsa 1.8s ease-in-out infinite}
+@keyframes pulsa{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+.ronda-faixa .txt{font-size:13.5px;font-weight:700;color:var(--st-late);line-height:1.45}
+.ronda-faixa .txt .sub{display:block;font-weight:600;font-size:12px;color:var(--muted);margin-top:2px}
+.obs-lista{display:flex;flex-direction:column;gap:10px}
+.obs-card{border:1.5px solid var(--border);border-radius:var(--radius);background:var(--surface2);padding:12px 14px}
+.obs-card .cab{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:5px}
+.obs-card .nro{font-size:11px;font-weight:800;letter-spacing:.05em;color:#fff;background:var(--dark);
+               border-radius:20px;padding:3px 9px}
+.obs-card .loc{font-size:14px;font-weight:800;color:var(--dark)}
+.obs-card .hora{font-size:11.5px;color:var(--muted);margin-left:auto;font-weight:700;white-space:nowrap}
+.obs-card .desc{font-size:13.5px;color:var(--text);line-height:1.5;white-space:pre-wrap}
+.obs-card .fot{font-size:11.5px;font-weight:700;color:var(--st-in);margin-top:6px}
+.obs-vazio{border:1.5px dashed var(--border2);border-radius:var(--radius);padding:1.4rem 1rem;text-align:center;
+           font-size:13.5px;color:var(--muted);line-height:1.5}
+.ronda-acoes{display:grid;grid-template-columns:1fr;gap:10px;margin-top:1.1rem}
+.ronda-acoes .btn{width:100%}
+.fim-escolha{display:grid;grid-template-columns:1fr;gap:11px}
+.fim-op{border:1.5px solid var(--border2);border-radius:var(--radius-lg);background:var(--surface);
+        padding:1.1rem 1.2rem;text-align:left;cursor:pointer;font-family:inherit;
+        display:flex;gap:13px;align-items:flex-start;transition:border-color .14s,box-shadow .14s}
+.fim-op:hover{box-shadow:0 5px 16px rgba(0,0,0,.1)}
+.fim-op.seguir:hover{border-color:var(--st-in)}
+.fim-op.acabar:hover{border-color:var(--st-out)}
+.fim-op .mk{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.fim-op .mk svg{width:21px;height:21px;fill:none;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}
+.fim-op.seguir .mk{background:var(--st-in-bg);border:1.5px solid var(--st-in-bd)}
+.fim-op.seguir .mk svg{stroke:var(--st-in)}
+.fim-op.acabar .mk{background:var(--st-out-bg);border:1.5px solid var(--st-out-bd)}
+.fim-op.acabar .mk svg{stroke:var(--st-out)}
+.fim-op .tt{font-size:15px;font-weight:800;color:var(--dark);margin-bottom:3px}
+.fim-op .ds{font-size:12.5px;color:var(--muted);line-height:1.5}
+.rnd-linha{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);
+           padding:12px 14px;margin-bottom:9px;cursor:pointer;display:flex;align-items:center;gap:12px;
+           transition:border-color .14s,box-shadow .14s;border-left:5px solid var(--st-out)}
+.rnd-linha:hover{border-color:var(--border2);box-shadow:0 3px 10px rgba(0,0,0,.07)}
+.rnd-linha.aberta{border-left-color:var(--red)}
+.rnd-linha .id{font-family:"Courier New",monospace;font-size:13px;font-weight:700;color:var(--dark);white-space:nowrap}
+.rnd-linha .meio{min-width:0;flex:1}
+.rnd-linha .quem{font-size:13.5px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rnd-linha .qdo{font-size:11.5px;color:var(--muted);margin-top:2px}
+.rnd-linha .qt{font-size:11.5px;font-weight:800;border-radius:20px;padding:4px 10px;white-space:nowrap}
+.rnd-linha .qt.zero{background:var(--st-out-bg);color:var(--st-out);border:1px solid var(--st-out-bd)}
+.rnd-linha .qt.tem{background:var(--st-warn-bg);color:var(--st-warn);border:1px solid var(--st-warn-bd)}
+
 /* ====== TRAVA DO FORMULÁRIO ATÉ ABRIR TURNO ====== */
-#formWrap.locked{opacity:.35;pointer-events:none;filter:grayscale(.5);user-select:none}
+/* Vale para o formulário de entrada e para a ronda: sem turno aberto,
+   nenhum dos dois aceita registro. */
+.locked{opacity:.35;pointer-events:none;filter:grayscale(.5);user-select:none}
 .lock-hint{display:none;text-align:center;font-size:15px;font-weight:700;color:var(--st-late);
            background:var(--st-late-bg);border:2px dashed var(--st-late-bd);border-radius:var(--radius-lg);
            padding:18px;margin:-.4rem 0 1rem}
@@ -515,6 +612,8 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
       <span class="user-nome" id="userNome">—</span>
       <span class="user-papel" id="userPapel">—</span>
       <span class="sync off" id="syncBox"><span class="dot"></span><span id="syncTxt">—</span></span>
+      <button class="hub-volta" id="btnInicio" type="button" onclick="irModulo(null)" hidden>
+        <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>Início</button>
       <button class="btn btn-outline btn-sm" type="button" onclick="abrirMinhaConta()">Minha conta</button>
       <button class="btn btn-outline btn-sm" type="button" onclick="fazerLogout()">Sair</button>
     </div>
@@ -530,7 +629,7 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
     </div>
   </div>
 
-  <nav class="tabs">
+  <nav class="tabs" id="tabsPortaria" hidden>
     <div class="tabs-inner">
       <button class="tab sel" data-pane="novo"       onclick="irPara('novo')">Nova entrada</button>
       <button class="tab"     data-pane="abertos"    onclick="irPara('abertos')">Estão dentro <span class="n zero" id="nAbertos">0</span></button>
@@ -539,9 +638,37 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
       <button class="tab"     data-pane="porteiros"  onclick="irPara('porteiros')">Porteiros <span class="n zero" id="nPorteiros">0</span></button>
     </div>
   </nav>
+
+  <nav class="tabs" id="tabsRonda" hidden>
+    <div class="tabs-inner">
+      <button class="tab sel" data-pane="ronda"  onclick="irPara('ronda')">Fazer ronda</button>
+      <button class="tab"     data-pane="rondas" onclick="irPara('rondas')">Rondas feitas <span class="n zero" id="nRondas">0</span></button>
+      <button class="tab"     data-pane="porteiros" onclick="irPara('porteiros')">Porteiros <span class="n zero" id="nPorteiros2">0</span></button>
+    </div>
+  </nav>
 </div>
 
-<main class="wrap">
+<!-- ================= TELA INICIAL: ESCOLHA DO MÓDULO ================= -->
+<div class="hub" id="hub" hidden>
+  <h1>O que você vai fazer agora?</h1>
+  <p class="sub">Escolha uma das duas. Dá para trocar a qualquer momento pelo botão <b>Início</b>, lá em cima.</p>
+  <div class="hub-grid">
+    <button class="hub-card v" type="button" onclick="irModulo('portaria')">
+      <span class="ico"><svg viewBox="0 0 24 24"><path d="M3 13l2-5a2 2 0 012-1.4h10A2 2 0 0119 8l2 5"/><path d="M3 13h18v5H3z"/><circle cx="7.5" cy="18.5" r="1.6"/><circle cx="16.5" cy="18.5" r="1.6"/></svg></span>
+      <span class="tt">Controle de Entrada de Veículos</span>
+      <span class="ds">Liberar entrada, registrar saída e consultar quem está dentro da unidade.</span>
+      <span class="st livre" id="hubStatusVeic">—</span>
+    </button>
+    <button class="hub-card r" type="button" onclick="irModulo('ronda')">
+      <span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2.5l7.5 3v5.6c0 4.6-3.1 8.8-7.5 10.4-4.4-1.6-7.5-5.8-7.5-10.4V5.5z"/><path d="M9.2 12.2l2 2 3.6-3.9"/></svg></span>
+      <span class="tt">Ronda</span>
+      <span class="ds">Fazer a inspeção da unidade e registrar só o que estiver fora do normal.</span>
+      <span class="st livre" id="hubStatusRonda">—</span>
+    </button>
+  </div>
+</div>
+
+<main class="wrap" id="appWrap" hidden>
 
   <!-- ================= ABA: NOVA ENTRADA ================= -->
   <section class="pane on" id="pane-novo">
@@ -855,8 +982,197 @@ table.tbl td.mono{font-family:"Courier New",monospace;font-weight:700;letter-spa
     </div>
   </section>
 
+  <!-- ================= ABA: FAZER RONDA ================= -->
+  <section class="pane" id="pane-ronda">
+
+    <!-- Estado 1: nenhuma ronda em andamento -->
+    <div id="rondaInicio">
+      <div class="ronda-hero">
+        <h2>Nenhuma ronda em andamento</h2>
+        <p>Ao começar, o sistema já anota a hora e o seu nome. Durante o percurso,
+           registre só o que estiver fora do normal. Se não achar nada, é só finalizar.</p>
+        <button class="btn btn-red btn-xl" type="button" onclick="iniciarRonda()">
+          <svg viewBox="0 0 24 24"><path d="M12 2.5l7.5 3v5.6c0 4.6-3.1 8.8-7.5 10.4-4.4-1.6-7.5-5.8-7.5-10.4V5.5z"/><path d="M9.2 12.2l2 2 3.6-3.9"/></svg>
+          COMEÇAR RONDA
+        </button>
+      </div>
+    </div>
+
+    <!-- Estado 2: ronda aberta, entre observações -->
+    <div id="rondaPainel" hidden>
+      <div class="ronda-faixa">
+        <span class="pulso"></span>
+        <span class="txt" id="rondaFaixaTxt">—</span>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/></svg>
+          <h2>Observações desta ronda</h2>
+          <span class="count-pill" id="pillObs">—</span>
+        </div>
+        <div class="card-body">
+          <div id="listaObs"></div>
+          <div class="ronda-acoes">
+            <button class="btn btn-red btn-xl" type="button" onclick="novoPack()">
+              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              REGISTRAR OBSERVAÇÃO
+            </button>
+            <button class="btn btn-green btn-xl" type="button" onclick="finalizarRonda()">
+              <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+              FINALIZAR RONDA
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Estado 3: preenchendo um pack de observação -->
+    <div id="rondaPack" hidden>
+      <div class="passos">
+        <div class="passos-top">
+          <span class="passos-num" id="pkNum">Passo 1 de 4</span>
+          <span class="passos-nome" id="pkNome">—</span>
+          <button class="passos-limpar" type="button" onclick="cancelarPack()">Cancelar observação</button>
+        </div>
+        <div class="passos-track"><div class="passos-fill" id="pkFill"></div></div>
+      </div>
+
+      <div class="card" data-pk="1">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <h2>Onde foi</h2>
+        </div>
+        <div class="card-body">
+          <div class="field" id="wobLocal">
+            <label for="obLocal">Local da observação <span class="req">*</span></label>
+            <input type="text" id="obLocal" list="dlLocais" autocomplete="off"
+                   placeholder="Ex.: Portão 2, Pátio de tubos, Galpão A…">
+            <span class="hint">Escreva de um jeito que outra pessoa ache o lugar.</span>
+            <span class="msg" id="mobLocal"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" data-pk="2">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/></svg>
+          <h2>O que você viu</h2>
+        </div>
+        <div class="card-body">
+          <div class="field" id="wobDescricao">
+            <label for="obDescricao">Descrição da observação <span class="req">*</span></label>
+            <textarea id="obDescricao" rows="5"
+                      placeholder="Ex.: Portão do pátio destrancado e sem cadeado."></textarea>
+            <span class="hint">Conte o que estava errado e o que você fez, se fez alguma coisa.</span>
+            <span class="msg" id="mobDescricao"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" data-pk="3">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <h2>Fotos</h2>
+        </div>
+        <div class="card-body">
+          <div class="warn-box i">Opcional, mas ajuda muito. Dá para tirar na hora ou escolher do celular,
+            e você pode riscar e apontar setas em cima da foto.</div>
+          <div class="warn-box w">As fotos só ficam guardadas depois que você <b>salvar a observação</b>.
+            Se fechar o aplicativo antes disso, o texto continua salvo, mas as fotos precisam ser tiradas de novo.</div>
+          <div class="act-group" style="margin-bottom:6px">
+            <button class="btn btn-dark" type="button" onclick="document.getElementById('obCam').click()">
+              <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              Tirar foto agora
+            </button>
+            <button class="btn btn-outline" type="button" onclick="document.getElementById('obArq').click()">
+              <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+              Escolher do aparelho
+            </button>
+          </div>
+          <input type="file" id="obCam" accept="image/*" capture="environment" multiple hidden
+                 onchange="adicionarFotos(this,'ronda')">
+          <input type="file" id="obArq" accept="image/*" multiple hidden
+                 onchange="adicionarFotos(this,'ronda')">
+          <div id="fotosRonda"></div>
+        </div>
+      </div>
+
+      <div class="card" data-pk="4">
+        <div class="card-head">
+          <svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+          <h2>Salvar esta observação</h2>
+        </div>
+        <div class="card-body">
+          <div id="pkResumo" style="margin-bottom:16px"></div>
+          <div class="fim-escolha">
+            <button class="fim-op seguir" type="button" onclick="salvarPack('continuar')">
+              <span class="mk"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M13 5l7 7-7 7"/></svg></span>
+              <span>
+                <span class="tt">Salvar e continuar a ronda</span>
+                <span class="ds">Guarda esta observação e volta para a ronda. Você pode registrar outras.</span>
+              </span>
+            </button>
+            <button class="fim-op acabar" type="button" onclick="salvarPack('finalizar')">
+              <span class="mk"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+              <span>
+                <span class="tt">Salvar e finalizar a ronda</span>
+                <span class="ds">Guarda esta observação, marca a hora do fim e encerra a ronda.</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav-passos">
+        <button class="btn btn-outline btn-xl" id="pkVoltar"  type="button" onclick="pkAnterior()">Voltar</button>
+        <button class="btn btn-red btn-xl"     id="pkAvancar" type="button" onclick="pkProximo()">Avançar</button>
+      </div>
+    </div>
+
+    <div class="lock-hint" id="rondaLock">Comece o turno lá em cima para fazer a ronda.</div>
+  </section>
+
+  <!-- ================= ABA: RONDAS FEITAS ================= -->
+  <section class="pane" id="pane-rondas">
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
+        <h2>Histórico de rondas</h2>
+        <span class="count-pill" id="pillRondas">—</span>
+      </div>
+      <div class="card-body">
+        <div class="filters" style="margin-bottom:16px">
+          <div class="field">
+            <label>Procurar</label>
+            <input type="text" id="rBusca" placeholder="Número, porteiro, local, descrição…" oninput="renderRondas()">
+          </div>
+          <div class="field">
+            <label>De</label>
+            <input type="date" id="rDe" onchange="renderRondas()">
+          </div>
+          <div class="field">
+            <label>Até</label>
+            <input type="date" id="rAte" onchange="renderRondas()">
+          </div>
+          <div class="field">
+            <label>Situação</label>
+            <select id="rStatus" onchange="renderRondas()">
+              <option value="">Todas</option>
+              <option value="concluida">Finalizadas</option>
+              <option value="aberta">Em andamento</option>
+            </select>
+          </div>
+        </div>
+        <div id="listaRondas"></div>
+      </div>
+    </div>
+  </section>
+
   <div class="page-footer">Perpec Oilfield Supply — <span id="ftDoc"></span></div>
 </main>
+
+<datalist id="dlLocais"></datalist>
 
 <!-- listas de sugestão alimentadas pelo próprio histórico -->
 <datalist id="dlPessoas"></datalist>
@@ -936,7 +1252,10 @@ let PAD = null;            // instância do bloco de assinatura em uso
 let EDITOR = null;         // editor de marcação de foto aberto
 
 // Fotos escolhidas mas ainda não enviadas. Cada item: {id, dataUrl, marcada}
-const FOTOS = { entrada:[], saida:[] };
+// "momento" é a área de trabalho da foto: entrada e saída de veículo, ou a
+// observação de ronda que está sendo preenchida.
+const FOTOS = { entrada:[], saida:[], ronda:[] };
+const ALVO_FOTOS = { entrada:'fotosEntrada', saida:'fotosSaida', ronda:'fotosRonda' };
 let EU = null;             // perfil logado: {id, matricula, nome, papel, assinatura}
 
 const souGestor = () => !!EU && EU.papel==='gestor';
@@ -951,7 +1270,10 @@ const souGestor = () => !!EU && EU.papel==='gestor';
 function dbVazio(){
   // porteiros:   espelho de public.perfis — { id, matricula, nome, papel, assinId, ativo }
   // assinaturas: { id do perfil -> PNG base64 }, montado a partir dos perfis
-  return { v:4, registros:[], porteiros:[], turno:null, assinaturas:{}, rascunho:null };
+  // rondas:      espelho de public.rondas, com as observações penduradas em cada uma
+  // packRascunho: pack de observação sendo preenchido — sobrevive a fechar o app
+  return { v:5, registros:[], porteiros:[], turno:null, assinaturas:{}, rascunho:null,
+           rondas:[], packRascunho:null };
 }
 
 function dbCarregar(){
@@ -1018,7 +1340,39 @@ function aplicarDoServidor(pacote){
     });
     DB.registros=Object.values(porId);
   }
+  if(pacote.rondas){
+    const porId={};
+    if(!pacote.completo) DB.rondas.forEach(r=>porId[r.id]=r);
+    else DB.rondas.filter(r=>r.provisorio).forEach(r=>porId[r.id]=r);   // ainda não subiram
+    pacote.rondas.forEach(x=>{
+      const antiga=porId[x.id];
+      // A lista de observações vem separada; não deixa a ronda voltar sem ela.
+      if(antiga && antiga.observacoes && !x.observacoes) x.observacoes=antiga.observacoes;
+      if(!x.observacoes) x.observacoes=[];
+      porId[x.id]=x;
+    });
+    DB.rondas=Object.values(porId);
+  }
+  if(pacote.observacoes && pacote.observacoes.length){
+    // Observação nunca é editada: basta acrescentar a que ainda não temos.
+    const porRonda={};
+    DB.rondas.forEach(r=>{ if(!Array.isArray(r.observacoes)) r.observacoes=[]; porRonda[r.id]=r; });
+    pacote.observacoes.forEach(o=>{
+      const r=porRonda[o.rondaId]; if(!r) return;
+      const i=r.observacoes.findIndex(x=>x.id===o.id);
+      if(i>=0) r.observacoes[i]=Object.assign({},r.observacoes[i],o);
+      else     r.observacoes.push(o);
+    });
+    DB.rondas.forEach(r=>r.observacoes.sort((a,b)=>(a.ordem||0)-(b.ordem||0)));
+  }
   dbSalvar();
+}
+
+/* A ronda aberta do porteiro logado, se houver. É ela que trava o
+   encerramento do turno e que o painel mostra. */
+function rondaAberta(){
+  if(!EU) return null;
+  return DB.rondas.find(r=>r.status==='aberta' && r.matricula===EU.matricula) || null;
 }
 
 /* ================================================================
@@ -1304,7 +1658,7 @@ async function adicionarFotos(input, momento){
 }
 
 function renderFotos(momento){
-  const alvo=document.getElementById(momento==='entrada'?'fotosEntrada':'fotosSaida');
+  const alvo=document.getElementById(ALVO_FOTOS[momento]||'');
   if(!alvo) return;
   const lista=FOTOS[momento];
   if(!lista.length){ alvo.innerHTML='<div class="foto-vazio">Nenhuma foto anexada.</div>'; return; }
@@ -1729,8 +2083,11 @@ function renderPorteiros(){
 
   const ativos=lista.filter(p=>p.ativo).length;
   document.getElementById('pillPorteiros').textContent=ativos+' ativo(s) de '+lista.length;
-  const n=document.getElementById('nPorteiros');
-  n.textContent=lista.length; n.className='n '+(lista.length?'out':'zero');
+  // A aba Porteiros aparece nas duas barras; o contador é o mesmo.
+  ['nPorteiros','nPorteiros2'].forEach(id=>{
+    const n=document.getElementById(id);
+    if(n){ n.textContent=lista.length; n.className='n '+(lista.length?'out':'zero'); }
+  });
 
   // Ações de cadastro são de gestor.
   const cx=document.getElementById('acoesPorteiros');
@@ -1793,6 +2150,20 @@ function confirmarAbrirTurno(){
 }
 
 function encerrarTurno(){
+  // Ronda começada é obrigação do turno: quem abriu tem de fechar antes de
+  // sair, senão a inspeção fica sem hora de término e sem assinatura.
+  const ra=rondaAberta();
+  if(ra){
+    abrirModalCustom('Ronda em andamento',
+      '<div class="warn-box e">Você começou a ronda <b>'+esc(ra.numero)+'</b> em '+
+      esc(fmtDT(ra.inicio))+' e ainda não finalizou.</div>'+
+      '<p style="font-size:13.5px;line-height:1.6;color:var(--muted)">'+
+      'O turno só pode ser encerrado depois que a ronda for finalizada. '+
+      'Se você percorreu tudo e não encontrou nada fora do normal, finalize sem observação nenhuma.</p>',
+      [{txt:'Agora não',cls:'btn-outline',fn:fecharModal},
+       {txt:'Ir para a ronda',cls:'btn-red',fn:()=>{ fecharModal(); irModulo('ronda'); }}]);
+    return;
+  }
   const dentro=DB.registros.filter(r=>r.status==='aberto').length;
   const aviso = dentro ? '\n\nATENÇÃO: ainda tem '+dentro+' carro(s) dentro da unidade.' : '';
   if(!confirm('Encerrar o turno de '+DB.turno.porteiro+'?'+aviso)) return;
@@ -1836,6 +2207,8 @@ function renderTurno(){
     document.getElementById('pvPorteiro').textContent='—';
     document.getElementById('pvTurno').textContent='—';
   }
+  // A ronda tem a mesma trava do formulário: sem turno, não registra.
+  renderRonda();
 }
 
 /* ================================================================
@@ -2241,14 +2614,460 @@ function excluir(id){
 }
 
 /* ================================================================
-   10. RENDERIZAÇÃO
+   9b. MÓDULOS — a tela inicial e as duas portas
+   ----------------------------------------------------------------
+   MODULO null = tela de escolha. Cada módulo tem sua própria barra de
+   abas; a faixa de usuário e a de turno valem para os dois, porque o
+   turno é a mesma coisa em qualquer um deles.
    ================================================================ */
+let MODULO = null;
+const ABA_INICIAL = { portaria:'novo', ronda:'ronda' };
+const CHAVE_MODULO = 'perpec.portaria.modulo';
+
+function irModulo(m){
+  MODULO = (m==='portaria'||m==='ronda') ? m : null;
+  try{ if(MODULO) localStorage.setItem(CHAVE_MODULO,MODULO); else localStorage.removeItem(CHAVE_MODULO); }catch(e){}
+
+  document.getElementById('hub').hidden          = !!MODULO;
+  document.getElementById('appWrap').hidden      = !MODULO;
+  document.getElementById('btnInicio').hidden    = !MODULO;
+  document.getElementById('tabsPortaria').hidden = MODULO!=='portaria';
+  document.getElementById('tabsRonda').hidden    = MODULO!=='ronda';
+  // A faixa de turno é do porteiro, não do módulo; só some na tela de escolha.
+  document.getElementById('turnoStrip').style.display = MODULO ? '' : 'none';
+
+  if(MODULO) irPara(ABA_INICIAL[MODULO]);
+  else { renderHub(); window.scrollTo({top:0}); }
+}
+
+function renderHub(){
+  const dentro=DB.registros.filter(r=>r.status==='aberto').length;
+  const ev=document.getElementById('hubStatusVeic');
+  ev.textContent = dentro ? (dentro===1?'1 carro dentro da unidade':dentro+' carros dentro da unidade')
+                          : 'Nenhum carro dentro';
+  ev.className = 'st '+(dentro?'aberta':'livre');
+
+  const ra=rondaAberta();
+  const er=document.getElementById('hubStatusRonda');
+  if(ra){
+    const n=(ra.observacoes||[]).length;
+    er.textContent='Ronda em andamento desde '+fmtDT(ra.inicio)+
+                   (n?' · '+n+' observação(ões)':'');
+    er.className='st aberta';
+  }else{
+    er.textContent='Nenhuma ronda em andamento';
+    er.className='st livre';
+  }
+}
+
+/* ================================================================
+   9c. RONDA
+   ----------------------------------------------------------------
+   Uma ronda é UM registro que dura do início ao fim da inspeção. Dentro
+   dela vão os packs de observação — só o que estiver fora do normal.
+   Ronda sem nenhuma observação é resultado válido e esperado.
+
+   O pack em preenchimento vive em DB.packRascunho e as fotos dele em
+   FOTOS.ronda, então fechar o app no meio não perde o que já foi digitado.
+   ================================================================ */
+const NOMES_PK = ['Onde foi','O que você viu','Fotos (opcional)','Salvar'];
+const TOTAL_PK = NOMES_PK.length;
+let PK_PASSO = 1;
+let RONDA_TELA = 'inicio';        // 'inicio' | 'painel' | 'pack'
+
+function numeroProvisorioRonda(){
+  const ano=new Date().getFullYear();
+  const n=DB.rondas.filter(r=>r.provisorio).length+1;
+  return 'RND-'+ano+'-P'+String(n).padStart(3,'0');
+}
+
+/* O selo da ronda segue exatamente a mesma regra do selo do registro:
+   normaliza o que o banco reescreve, para conferir depois da ida e volta. */
+const CAMPOS_SELADOS_RONDA=['numero','status','porteiro','matricula','turno'];
+function seloRonda(r){
+  const base=JSON.stringify(CAMPOS_SELADOS_RONDA.map(k=>r[k]==null?'':String(r[k])))
+           + JSON.stringify([isoNormal(r.inicio),isoNormal(r.fim)])
+           + jsonCanonico(r.confirm||null)
+           + jsonCanonico((r.observacoes||[]).map(o=>({
+               id:o.id, local:o.local, descricao:o.descricao, ts:isoNormal(o.ts), ordem:o.ordem||0
+             })));
+  let h=0x811c9dc5;
+  for(let i=0;i<base.length;i++){ h^=base.charCodeAt(i); h=Math.imul(h,0x01000193)>>>0; }
+  return SELO_VERSAO+':'+h.toString(16).padStart(8,'0');
+}
+function selarRonda(r){ r.selo=seloRonda(r); return r; }
+function rondaIntegra(r){
+  if(!r.selo || String(r.selo).indexOf(SELO_VERSAO+':')!==0) return true;
+  return r.selo===seloRonda(r);
+}
+window.selarRonda=selarRonda;
+
+async function iniciarRonda(){
+  if(!DB.turno){ showToast('Comece o turno lá em cima antes de fazer a ronda.','error'); return; }
+  if(rondaAberta()){ renderRonda(); return; }
+
+  let numero=null, provisorio=false;
+  try{ numero=await PORTARIA.numeroNovoRonda(); }catch(e){ numero=null; }
+  if(!numero){
+    numero=numeroProvisorioRonda(); provisorio=true;
+    if(!confirm('Sem conexão com o servidor agora.\n\nA ronda será aberta neste aparelho com o '+
+                'número provisório '+numero+' e enviada assim que a internet voltar.\n\nComeçar?')) return;
+  }
+
+  const r={
+    id:uid(), numero:numero, provisorio:provisorio, status:'aberta',
+    inicio:new Date().toISOString(), fim:null,
+    porteiro:DB.turno.porteiro, matricula:DB.turno.matricula, turno:DB.turno.turno,
+    confirm:null, observacoes:[]
+  };
+  selarRonda(r);
+  DB.rondas.push(r);
+  DB.packRascunho=null;
+  dbSalvar();
+
+  PORTARIA.criarRonda(r);
+  PORTARIA.auditarRonda(r.id,'RONDA INICIADA','Início às '+fmtDT(r.inicio)+' por '+r.porteiro+'.');
+
+  RONDA_TELA='painel';
+  renderRonda(); renderRondas(); renderHub();
+  showToast('Ronda '+r.numero+' iniciada.','success');
+}
+
+/* ---------------- pack de observação ---------------- */
+function novoPack(){
+  const r=rondaAberta(); if(!r) return;
+  DB.packRascunho={ rondaId:r.id, local:'', descricao:'' };
+  FOTOS.ronda=[];
+  dbSalvar();
+  aplicarPackNoFormulario();
+  RONDA_TELA='pack'; PK_PASSO=1;
+  renderRonda();
+}
+
+function cancelarPack(){
+  if(!confirm('Descartar esta observação? O que você digitou e as fotos anexadas serão perdidos.')) return;
+  DB.packRascunho=null;
+  FOTOS.ronda=[];
+  renderFotos('ronda');
+  dbSalvar();
+  RONDA_TELA='painel';
+  renderRonda();
+}
+
+function aplicarPackNoFormulario(){
+  const p=DB.packRascunho||{local:'',descricao:''};
+  document.getElementById('obLocal').value=p.local||'';
+  document.getElementById('obDescricao').value=p.descricao||'';
+  renderFotos('ronda');
+}
+function salvarPackRascunho(){
+  if(!DB.packRascunho) return;
+  DB.packRascunho.local=document.getElementById('obLocal').value;
+  DB.packRascunho.descricao=document.getElementById('obDescricao').value;
+  dbSalvar();
+}
+
+/* Uma verdade só sobre o que é um pack válido: serve para avançar de
+   etapa e para salvar. */
+function erroDoPk(n){
+  const v=id=>document.getElementById(id).value.trim();
+  if(n===1 && v('obLocal').length<2)      return ['obLocal','Escreva onde foi a observação.'];
+  if(n===2 && v('obDescricao').length<3)  return ['obDescricao','Escreva o que você viu.'];
+  return null;
+}
+
+function pkIr(n){
+  PK_PASSO=Math.min(TOTAL_PK,Math.max(1,n));
+  document.querySelectorAll('#rondaPack .card[data-pk]').forEach(c=>
+    c.classList.toggle('on', Number(c.dataset.pk)===PK_PASSO));
+  document.getElementById('pkNum').textContent='Passo '+PK_PASSO+' de '+TOTAL_PK;
+  document.getElementById('pkNome').textContent=NOMES_PK[PK_PASSO-1];
+  document.getElementById('pkFill').style.width=Math.round(PK_PASSO/TOTAL_PK*100)+'%';
+  document.getElementById('pkVoltar').disabled = PK_PASSO===1;
+  // No último passo quem salva são as duas opções grandes do cartão.
+  document.getElementById('pkAvancar').style.display = PK_PASSO===TOTAL_PK ? 'none' : '';
+  if(PK_PASSO===TOTAL_PK) renderResumoPack();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function pkProximo(){
+  limparErros();
+  const e=erroDoPk(PK_PASSO);
+  if(e){ marcarErro(e[0],e[1]); return; }
+  salvarPackRascunho();
+  pkIr(PK_PASSO+1);
+}
+function pkAnterior(){ limparErros(); salvarPackRascunho(); pkIr(PK_PASSO-1); }
+
+function renderResumoPack(){
+  const local=document.getElementById('obLocal').value.trim();
+  const desc =document.getElementById('obDescricao').value.trim();
+  const nf=FOTOS.ronda.length;
+  document.getElementById('pkResumo').innerHTML=
+    '<div class="obs-card">'+
+      '<div class="cab"><span class="loc">'+esc(local||'—')+'</span>'+
+        '<span class="hora">'+esc(fmtDT(new Date().toISOString()))+'</span></div>'+
+      '<div class="desc">'+esc(desc||'—')+'</div>'+
+      '<div class="fot">'+(nf? nf+' foto(s) anexada(s)' : 'Sem fotos')+'</div>'+
+    '</div>';
+}
+
+async function salvarPack(depois){
+  limparErros();
+  // Revalida do começo: dá para chegar aqui e ter apagado um campo depois.
+  for(let n=1;n<=TOTAL_PK;n++){
+    const e=erroDoPk(n);
+    if(e){ pkIr(n); marcarErro(e[0],e[1]); showToast('Falta preencher: '+e[1],'error'); return; }
+  }
+  const r=rondaAberta();
+  if(!r){ showToast('A ronda não está mais aberta.','error'); RONDA_TELA='inicio'; renderRonda(); return; }
+
+  const o={
+    id:uid(), rondaId:r.id, ordem:(r.observacoes||[]).length,
+    local:document.getElementById('obLocal').value.trim(),
+    descricao:document.getElementById('obDescricao').value.trim(),
+    ts:new Date().toISOString()
+  };
+  r.observacoes=r.observacoes||[];
+  r.observacoes.push(o);
+  selarRonda(r);
+  DB.packRascunho=null;
+  dbSalvar();
+
+  PORTARIA.criarObservacao(o);
+  // A ronda muda de selo ao ganhar uma observação; o servidor precisa saber.
+  PORTARIA.atualizarRonda(r);
+
+  const nf=enviarFotosObs(r.id,o.id);
+  PORTARIA.auditarRonda(r.id,'OBSERVAÇÃO REGISTRADA',
+    'Local: '+o.local+(nf?' · '+nf+' foto(s)':' · sem fotos'));
+
+  showToast('Observação salva'+(nf?' com '+nf+' foto(s)':'')+'.','success');
+
+  if(depois==='finalizar'){ await encerrarRonda(r); return; }
+  RONDA_TELA='painel';
+  renderRonda(); renderRondas(); renderHub();
+}
+
+/* Envia as fotos do pack e limpa a área de trabalho. */
+function enviarFotosObs(rondaId, obsId){
+  const lista=FOTOS.ronda;
+  lista.forEach((f,i)=>PORTARIA.anexarFotoObs(rondaId, obsId, f.dataUrl, i, f.marcada));
+  const n=lista.length;
+  FOTOS.ronda=[];
+  renderFotos('ronda');
+  return n;
+}
+
+/* ---------------- finalizar ---------------- */
+function finalizarRonda(){
+  const r=rondaAberta(); if(!r) return;
+  const n=(r.observacoes||[]).length;
+  const txt = n ? 'Finalizar a ronda '+r.numero+' com '+n+' observação(ões) registrada(s)?'
+                : 'Finalizar a ronda '+r.numero+' sem nenhuma observação?\n\n'+
+                  'Isso quer dizer que você percorreu a unidade e não encontrou nada fora do normal.';
+  if(!confirm(txt)) return;
+  encerrarRonda(r);
+}
+
+async function encerrarRonda(r){
+  r.status='concluida';
+  r.fim=new Date().toISOString();
+  // A assinatura fica identificada pelo perfil, igual à do porteiro no
+  // formulário de entrada: é ela que sai no relatório.
+  r.confirm={ nome:DB.turno?DB.turno.porteiro:r.porteiro,
+              matricula:DB.turno?DB.turno.matricula:r.matricula,
+              ts:r.fim, termo:CONFIG.TERMO_RONDA,
+              assinId:DB.turno?DB.turno.assinId:null };
+  selarRonda(r);
+  DB.packRascunho=null;
+  dbSalvar();
+
+  PORTARIA.atualizarRonda(r);
+  PORTARIA.auditarRonda(r.id,'RONDA FINALIZADA',
+    (r.observacoes||[]).length+' observação(ões) · duração '+duracao(new Date(r.fim)-new Date(r.inicio)));
+
+  RONDA_TELA='inicio';
+  renderRonda(); renderRondas(); renderHub();
+  showToast('Ronda '+r.numero+' finalizada.','success');
+}
+
+/* ---------------- desenho da aba ---------------- */
+function renderRonda(){
+  const aberta=rondaAberta();
+  // A sincronização automática chama renderTudo a cada 30s. Se o pack já
+  // estava na tela, os campos NÃO podem ser reescritos: isso apagaria a
+  // digitação em curso e mataria o teclado do celular no meio da palavra.
+  const jaNoPack = !document.getElementById('rondaPack').hidden;
+
+  if(!aberta && RONDA_TELA!=='inicio') RONDA_TELA='inicio';
+  // Rascunho de pack achado ao abrir o app: volta direto para ele.
+  if(aberta && DB.packRascunho && DB.packRascunho.rondaId===aberta.id && RONDA_TELA==='inicio'){
+    RONDA_TELA='pack';
+  }
+  if(aberta && RONDA_TELA==='inicio') RONDA_TELA='painel';
+
+  document.getElementById('rondaInicio').hidden = RONDA_TELA!=='inicio';
+  document.getElementById('rondaPainel').hidden = RONDA_TELA!=='painel';
+  document.getElementById('rondaPack').hidden   = RONDA_TELA!=='pack';
+
+  // Sem turno aberto não se faz ronda, pela mesma razão do formulário de
+  // entrada: todo registro precisa nascer com porteiro identificado.
+  const semTurno=!DB.turno;
+  document.getElementById('rondaLock').style.display = semTurno ? 'block' : 'none';
+  ['rondaInicio','rondaPainel','rondaPack'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.classList.toggle('locked', semTurno);
+  });
+
+  // Só monta o formulário ao ENTRAR no pack, nunca num redesenho de rotina.
+  if(RONDA_TELA==='pack' && !jaNoPack){
+    aplicarPackNoFormulario();
+    pkIr(PK_PASSO);
+  }
+  if(!aberta) return;
+
+  const obs=aberta.observacoes||[];
+  document.getElementById('rondaFaixaTxt').innerHTML=
+    'Ronda '+esc(aberta.numero)+' em andamento'+
+    '<span class="sub">Começou '+esc(fmtDT(aberta.inicio))+' · '+esc(aberta.porteiro)+
+    ' · '+esc(duracao(Date.now()-new Date(aberta.inicio)))+' até agora</span>';
+  document.getElementById('pillObs').textContent = obs.length ? obs.length+' registrada(s)' : 'nenhuma ainda';
+  document.getElementById('listaObs').innerHTML = obs.length
+    ? '<div class="obs-lista">'+obs.map((o,i)=>cartaoObs(o,i)).join('')+'</div>'
+    : '<div class="obs-vazio">Nenhuma observação registrada nesta ronda.<br>'+
+      'Se você percorreu tudo e não achou nada fora do normal, pode finalizar assim mesmo.</div>';
+}
+
+function cartaoObs(o,i,fotos){
+  const nf = fotos ? fotos.length : null;
+  return '<div class="obs-card">'+
+    '<div class="cab">'+
+      '<span class="nro">'+(i+1)+'</span>'+
+      '<span class="loc">'+esc(o.local)+'</span>'+
+      '<span class="hora">'+esc(fmtDT(o.ts))+'</span>'+
+    '</div>'+
+    '<div class="desc">'+esc(o.descricao)+'</div>'+
+    (nf!==null && nf>0 ? '<div class="fot">'+nf+' foto(s)</div>' : '')+
+  '</div>';
+}
+
+/* ---------------- histórico de rondas ---------------- */
+function rondasFiltradas(){
+  const q=(document.getElementById('rBusca').value||'').trim().toLowerCase();
+  const de=document.getElementById('rDe').value, ate=document.getElementById('rAte').value;
+  const st=document.getElementById('rStatus').value;
+  return DB.rondas.filter(r=>{
+    if(st && r.status!==st) return false;
+    if(de  && r.inicio < new Date(de+'T00:00').toISOString()) return false;
+    if(ate && r.inicio > new Date(ate+'T23:59:59').toISOString()) return false;
+    if(q){
+      const alvo=[r.numero,r.porteiro,r.matricula,r.turno]
+        .concat((r.observacoes||[]).map(o=>o.local+' '+o.descricao))
+        .join(' ').toLowerCase();
+      if(alvo.indexOf(q)<0) return false;
+    }
+    return true;
+  }).sort((a,b)=>String(b.inicio).localeCompare(String(a.inicio)));
+}
+
+function renderRondas(){
+  const alvo=document.getElementById('listaRondas');
+  if(!alvo) return;
+  const pill=document.getElementById('pillRondas');
+  const nR=document.getElementById('nRondas');
+  if(nR){ nR.textContent=DB.rondas.length; nR.classList.toggle('zero',!DB.rondas.length); }
+
+  const lista=rondasFiltradas();
+  if(pill) pill.textContent=lista.length+' de '+DB.rondas.length;
+  if(!lista.length){
+    alvo.innerHTML='<div class="obs-vazio">Nenhuma ronda encontrada.</div>';
+    return;
+  }
+  alvo.innerHTML=lista.map(r=>{
+    const n=(r.observacoes||[]).length;
+    const dur = r.fim ? duracao(new Date(r.fim)-new Date(r.inicio)) : 'em andamento';
+    return '<div class="rnd-linha'+(r.status==='aberta'?' aberta':'')+'" onclick="verRonda(\''+r.id+'\')">'+
+      '<span class="id">'+esc(r.numero)+'</span>'+
+      '<span class="meio">'+
+        '<span class="quem">'+esc(r.porteiro)+'</span>'+
+        '<span class="qdo">'+esc(fmtDT(r.inicio))+' · '+esc(dur)+'</span>'+
+      '</span>'+
+      '<span class="qt '+(n?'tem':'zero')+'">'+(n? n+' obs.' : 'sem ocorrência')+'</span>'+
+    '</div>';
+  }).join('');
+}
+
+async function verRonda(id){
+  const r=DB.rondas.find(x=>x.id===id); if(!r) return;
+  MODAL_ID=null;
+  const obs=r.observacoes||[];
+  const dur = r.fim ? duracao(new Date(r.fim)-new Date(r.inicio)) : duracao(Date.now()-new Date(r.inicio));
+
+  let avisos='';
+  if(r.status==='aberta') avisos+='<div class="warn-box e"><b>EM ANDAMENTO</b> — esta ronda ainda não foi finalizada.</div>';
+  else avisos+='<div class="warn-box g"><b>FINALIZADA</b> — durou '+esc(dur)+'.</div>';
+  if(r.provisorio) avisos+='<div class="warn-box w">Ronda feita sem internet. Ainda não subiu para o servidor, '+
+                           'e o número <b>'+esc(r.numero)+'</b> é provisório.</div>';
+  if(!rondaIntegra(r)) avisos+='<div class="warn-box e">Os dados desta ronda não conferem com o selo gravado.</div>';
+
+  const cab='<div class="sec-title">Identificação da ronda</div>'+
+    '<div class="kv">'+
+      kvItem('Número da ronda',r.numero)+
+      kvItem('Porteiro responsável',r.porteiro+(r.matricula?' (mat. '+r.matricula+')':''))+
+      kvItem('Turno',r.turno)+
+    '</div>'+
+    '<div class="sec-title">Início e fim</div>'+
+    '<div class="kv">'+
+      kvItem('Começou',fmtDT(r.inicio))+
+      kvItem('Terminou',r.fim?fmtDT(r.fim):'ainda em andamento')+
+      kvItem('Duração',dur)+
+      kvItem('Observações',obs.length?String(obs.length):'nenhuma')+
+    '</div>';
+
+  const corpo = obs.length
+    ? '<div class="obs-lista" id="obsDoModal">'+obs.map((o,i)=>cartaoObs(o,i)).join('')+'</div>'
+    : '<div class="obs-vazio">Ronda sem ocorrências: o porteiro percorreu a unidade e não '+
+      'encontrou nada fora do normal.</div>';
+
+  const botoes=[{txt:'Fechar',cls:'btn-outline',fn:fecharModal}];
+  if(r.status==='concluida') botoes.push({txt:'Gerar relatório',cls:'btn-red',fn:()=>gerarRelatorioRonda(r.id)});
+
+  abrirModalCustom('Ronda '+r.numero, avisos+cab+
+    '<div class="sec-title">Observações registradas</div>'+corpo, botoes);
+
+  // As fotos vêm do servidor sob demanda, com URL assinada de curta duração.
+  if(obs.length) carregarFotosDaRonda(r);
+}
+
+async function carregarFotosDaRonda(r){
+  const obs=r.observacoes||[];
+  let porObs={};
+  try{ porObs=await PORTARIA.listarFotosDaRonda(obs.map(o=>o.id)); }catch(e){ porObs={}; }
+  const alvo=document.getElementById('obsDoModal');
+  if(!alvo) return;                       // modal já foi fechado
+  alvo.innerHTML=obs.map((o,i)=>{
+    const fs=porObs[o.id]||[];
+    return cartaoObs(o,i,fs)+(fs.length
+      ? '<div class="fotos-grid">'+fs.map(f=>
+          '<div class="foto-item">'+(f.marcada?'<span class="marca">marcada</span>':'')+
+          '<img src="'+esc(f.url)+'" alt="foto" onclick="ampliarUrl(\''+esc(f.url)+'\')"></div>').join('')+
+        '</div>'
+      : '');
+  }).join('');
+}
+
 function irPara(aba){
   ABA=aba;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('sel',t.dataset.pane===aba));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==='pane-'+aba));
+  if(aba==='ronda')  renderRonda();
+  if(aba==='rondas') renderRondas();
   window.scrollTo({top:0,behavior:'smooth'});
 }
+
+/* ================================================================
+   10. RENDERIZAÇÃO
+   ================================================================ */
 
 function cartaoRegistro(r){
   const s=situacao(r);
@@ -2383,6 +3202,8 @@ function renderContadores(){
   c.textContent=nc; c.className='n '+(nc?'out':'zero');
   const t=document.getElementById('nTotal');
   t.textContent=DB.registros.length; t.className='n '+(DB.registros.length?'':'zero');
+  const nr=document.getElementById('nRondas');
+  if(nr){ nr.textContent=DB.rondas.length; nr.className='n '+(DB.rondas.length?'':'zero'); }
 }
 
 function renderDatalists(){
@@ -2391,6 +3212,9 @@ function renderDatalists(){
   fill('dlPessoas',uniq(r=>r.pessoa));
   fill('dlEmpresas',uniq(r=>r.empresa));
   fill('dlAutorizadores',uniq(r=>r.autorizador));
+  // Locais já usados em rondas anteriores: o porteiro escolhe em vez de digitar.
+  const locais=[...new Set(DB.rondas.flatMap(r=>(r.observacoes||[]).map(o=>o.local)).filter(Boolean))].sort();
+  fill('dlLocais',locais);
 }
 
 function renderEspaco(){
@@ -2430,6 +3254,7 @@ function renderSync(info){
 function renderTudo(){
   renderContadores(); renderAbertos(); renderConcluidos(); renderHistorico();
   renderPorteiros(); renderDatalists(); renderEspaco();
+  renderRonda(); renderRondas(); renderHub();
 }
 
 /* ================================================================
@@ -2635,6 +3460,196 @@ function carregarLogo(){
   im.src=CONFIG.LOGO_URL;
 }
 
+/* ================================================================
+   12b. BASE COMUM DOS PDFs
+   ----------------------------------------------------------------
+   A declaração de entrada e o relatório de ronda são documentos
+   diferentes, mas o papel é o mesmo: mesma marca, mesma margem, mesma
+   tabela, mesmo bloco de assinatura, mesma grade de fotos. Tudo isso
+   mora aqui uma vez só — o encaixe das fotos em especial é delicado e
+   não pode existir em duas versões que divergem com o tempo.
+
+   O cursor vertical é P.y e todo helper o avança.
+   ================================================================ */
+function criarPDF({titulo, ident, refDoc, rodape}){
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
+  const W=210,H=297,ML=14,MR=14,CW=W-ML-MR;
+  const DARK=[26,18,16],GRAY=[135,130,125],RED=[192,57,43],LGRAY=[224,219,213];
+  const setC=c=>doc.setTextColor(...c), setD=c=>doc.setDrawColor(...c);
+  const logoB64=window.LOGO_B64||'';
+  const ASSIN_L=46, ASSIN_A=14;              // tamanho da assinatura no papel
+
+  const P={ doc, W,H,ML,MR,CW, DARK,GRAY,RED,LGRAY, setC,setD, y:26 };
+
+  P.header=function(){
+    if(logoB64){ try{ doc.addImage(logoB64,'PNG',ML,4,40,11); }catch(e){} }
+    setD(RED); doc.setLineWidth(0.8); doc.line(0,19,W,19);
+    doc.setFontSize(12); doc.setFont('helvetica','bold'); setC(DARK);
+    doc.text(titulo,W-MR,10,{align:'right'});
+    doc.setFontSize(7.5); doc.setFont('helvetica','normal'); setC(GRAY);
+    doc.text(ident+'  •  emitida em '+fmtDT(new Date().toISOString()),W-MR,15.5,{align:'right'});
+  };
+  P.footer=function(){
+    const pg=doc.internal.getCurrentPageInfo().pageNumber, tot=doc.internal.getNumberOfPages();
+    doc.setFontSize(6.5); doc.setFont('helvetica','italic'); setC([170,165,160]);
+    doc.text('Perpec Oilfield Supply  •  '+refDoc+'  •  '+rodape,W/2,H-7,{align:'center'});
+    doc.setFont('helvetica','normal');
+    doc.text('Página '+pg+' de '+tot,W-MR,H-7,{align:'right'});
+  };
+  P.novaPagina=function(){ doc.addPage(); P.header(); P.y=26; };
+
+  P.paragrafo=function(txt,tam){
+    doc.setFontSize(tam||9); doc.setFont('helvetica','normal'); setC(DARK);
+    const l=doc.splitTextToSize(txt,CW);
+    doc.text(l,ML,P.y); P.y+=l.length*4.2+4;
+  };
+
+  /* Tabelas compactas de propósito: o corpo precisa caber na primeira
+     página junto com o bloco assinado. */
+  P.tabela=function(tituloTab,dados){
+    doc.autoTable({
+      startY:P.y, margin:{left:ML,right:MR,top:24,bottom:16},
+      head:[[{content:tituloTab,colSpan:2,styles:{halign:'left',fillColor:DARK,textColor:[240,230,228],fontSize:7.5,fontStyle:'bold'}}]],
+      body:dados.map(l=>[l[0],l[1]||'—']),
+      styles:{fontSize:8.5,cellPadding:1.7,lineColor:LGRAY,lineWidth:0.1,valign:'top',overflow:'linebreak'},
+      columnStyles:{0:{cellWidth:50,fontStyle:'bold',textColor:GRAY},1:{cellWidth:CW-50,textColor:DARK}},
+      didDrawPage:()=>{ P.footer(); }
+    });
+    P.y=doc.lastAutoTable.finalY+3;
+  };
+
+  P.tituloSecao=function(txt){
+    doc.setFontSize(8); doc.setFont('helvetica','bold'); setC(RED);
+    doc.text(txt,ML,P.y); P.y+=2;
+    setD(LGRAY); doc.setLineWidth(0.3); doc.line(ML,P.y,ML+CW,P.y); P.y+=5;
+  };
+
+  /* ---- Bloco de conferência assinada ----
+     alturaTermo() tem de acompanhar termo() passo a passo: é ela que
+     decide a quebra de página ANTES de qualquer coisa ser desenhada. */
+  P.alturaTermo=function(c){
+    if(!c) return 0;
+    const img=(DB.assinaturas||{})[c.assinId];
+    const tl=doc.splitTextToSize(c.termo,CW);
+    return 2 + 4.5 + tl.length*3.8 + 2 + (img ? ASSIN_A+4.5 : 6) + 3;
+  };
+  P.termo=function(tituloTermo,c){
+    if(!c) return;
+    const img=(DB.assinaturas||{})[c.assinId];
+
+    doc.setFontSize(7.5); doc.setFont('helvetica','bold'); setC(RED);
+    doc.text(tituloTermo,ML,P.y); P.y+=2;
+    setD(LGRAY); doc.setLineWidth(0.3); doc.line(ML,P.y,ML+CW,P.y); P.y+=4.5;
+
+    doc.setFontSize(8); doc.setFont('helvetica','italic'); setC(DARK);
+    const tl=doc.splitTextToSize(c.termo,CW);
+    doc.text(tl,ML,P.y); P.y+=tl.length*3.8+2;
+
+    const quem=c.nome+(c.matricula?'  —  matrícula '+c.matricula:'');
+    if(img){
+      try{ doc.addImage(img,'PNG',ML,P.y,ASSIN_L,ASSIN_A); }catch(e){}
+      setD([120,115,110]); doc.setLineWidth(0.3); doc.line(ML,P.y+ASSIN_A+0.8,ML+ASSIN_L,P.y+ASSIN_A+0.8);
+      doc.setFontSize(8); doc.setFont('helvetica','bold'); setC(DARK);
+      doc.text(quem,ML+ASSIN_L+4,P.y+9);
+      doc.setFontSize(7); doc.setFont('helvetica','normal'); setC(GRAY);
+      doc.text('Confirmado em '+fmtDT(c.ts),ML+ASSIN_L+4,P.y+13.2);
+      P.y+=ASSIN_A+4.5;
+    }else{
+      doc.setFontSize(8); doc.setFont('helvetica','normal'); setC(GRAY);
+      doc.text('Confirmado por '+quem+' em '+fmtDT(c.ts)+'.',ML,P.y); P.y+=6;
+    }
+    P.y+=3;
+  };
+
+  /* Conferências são um conjunto: quem lê compara uma com a outra. Ou
+     cabem juntas onde estamos, ou vão juntas para a próxima página. */
+  P.termos=function(lista){
+    const usar=lista.filter(t=>t[1]);
+    if(!usar.length) return;
+    const alt=usar.reduce((s,t)=>s+P.alturaTermo(t[1]),0);
+    if(P.y+alt > H-20) P.novaPagina();
+    usar.forEach(t=>P.termo(t[0],t[1]));
+  };
+
+  /* Tamanho real da imagem. Sem isto, a foto é esticada até preencher a
+     caixa e a de celular em pé sai achatada. */
+  P.dimensoes=async function(b64){
+    try{
+      const p=doc.getImageProperties(b64);
+      if(p && p.width && p.height) return {w:p.width,h:p.height};
+    }catch(e){}
+    return await new Promise(ok=>{
+      const im=new Image();
+      im.onload =()=>ok({w:im.naturalWidth||4, h:im.naturalHeight||3});
+      im.onerror=()=>ok({w:4,h:3});
+      im.src=b64;
+    });
+  };
+
+  /* Grade de fotos, duas por linha.
+     itens: [{caminho, legenda}]. Baixa do Storage e embute no arquivo — o
+     PDF tem de continuar legível daqui a anos, sem link nem sessão. */
+  P.fotos=async function(tituloSecao, itens){
+    if(!itens || !itens.length) return 0;
+
+    // Baixa tudo antes de desenhar: a altura de cada linha depende das
+    // duas fotos que vão nela, então não dá para posicionar uma a uma.
+    const prontas=[];
+    for(const it of itens){
+      const b64=await PORTARIA.baixarFoto(it.caminho);
+      if(!b64) continue;
+      const d=await P.dimensoes(b64);
+      prontas.push({legenda:it.legenda||'', b64:b64, w:d.w, h:d.h});
+    }
+    if(!prontas.length) return 0;
+
+    // A caixa é o limite, não o formato: cada foto entra inteira nela,
+    // na proporção original.
+    const CAIXA_L=(CW-6)/2, CAIXA_A=74;
+    const escala=p=>{ const k=Math.min(CAIXA_L/p.w, CAIXA_A/p.h); return {l:p.w*k, a:p.h*k}; };
+
+    // Sem página nova forçada: as fotos seguem o documento. Só quebra se
+    // o título e a primeira linha realmente não couberem.
+    const primeira=Math.max(escala(prontas[0]).a, prontas[1]?escala(prontas[1]).a:0);
+    if(P.y+7+primeira+9 > H-18) P.novaPagina();
+    if(tituloSecao) P.tituloSecao(tituloSecao);
+
+    for(let i=0;i<prontas.length;i+=2){
+      const par=prontas.slice(i,i+2).map(p=>{ const e=escala(p); return {legenda:p.legenda,b64:p.b64,l:e.l,a:e.a}; });
+      const alturaLinha=Math.max.apply(null,par.map(p=>p.a));
+
+      if(P.y+alturaLinha+9 > H-18){
+        P.novaPagina();
+        if(tituloSecao) P.tituloSecao(tituloSecao+' (continuação)');
+      }
+      par.forEach((p,c)=>{
+        // Centralizada na coluna: foto em pé não fica encostada à esquerda.
+        const x0=ML+c*(CAIXA_L+6), x=x0+(CAIXA_L-p.l)/2;
+        try{ doc.addImage(p.b64,'JPEG',x,P.y,p.l,p.a); }catch(e){ return; }
+        setD(LGRAY); doc.setLineWidth(0.2); doc.rect(x,P.y,p.l,p.a);
+        doc.setFontSize(6.8); doc.setFont('helvetica','normal'); setC(GRAY);
+        doc.text(p.legenda, x0, P.y+alturaLinha+3.4);
+      });
+      P.y+=alturaLinha+9;
+    }
+    return prontas.length;
+  };
+
+  /* Fecha o documento: selo no rodapé, cabeçalho e paginação em todas as
+     folhas (só agora se sabe o total) e download. */
+  P.fechar=function(textoSelo, nomeArquivo){
+    doc.setFontSize(6.5); doc.setFont('helvetica','italic'); setC(GRAY);
+    doc.text(textoSelo,ML,H-13);
+    const tot=doc.internal.getNumberOfPages();
+    for(let i=1;i<=tot;i++){ doc.setPage(i); P.header(); P.footer(); }
+    doc.save(nomeArquivo);
+  };
+
+  P.header();
+  return P;
+}
+
 async function gerarDeclaracao(id){
   const r=DB.registros.find(x=>x.id===id); if(!r) return;
   if(!window.jspdf||!window.jspdf.jsPDF){ showToast('Não consegui gerar o PDF (sem internet para carregar a ferramenta).','error'); return; }
@@ -2642,54 +3657,15 @@ async function gerarDeclaracao(id){
                               ' é provisório.\n\nAo sincronizar ele vai receber o número definitivo, '+
                               'e este PDF ficará desatualizado.\n\nGerar mesmo assim?')) return;
 
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
-  const W=210,H=297,ML=14,MR=14,CW=W-ML-MR;
-  const DARK=[26,18,16],GRAY=[135,130,125],RED=[192,57,43],LGRAY=[224,219,213];
-  const setC=c=>doc.setTextColor(...c), setD=c=>doc.setDrawColor(...c);
-  const logoB64=window.LOGO_B64||'';
+  const P=criarPDF({
+    titulo:'DECLARAÇÃO DE AUTORIZAÇÃO DE ENTRADA',
+    ident:r.numero, refDoc:CONFIG.DOC_REF, rodape:'Controle de Entrada de Veículos'
+  });
+  const tabela=P.tabela;
 
-  function header(){
-    if(logoB64){ try{ doc.addImage(logoB64,'PNG',ML,4,40,11); }catch(e){} }
-    setD(RED); doc.setLineWidth(0.8); doc.line(0,19,W,19);
-    doc.setFontSize(12); doc.setFont('helvetica','bold'); setC(DARK);
-    doc.text('DECLARAÇÃO DE AUTORIZAÇÃO DE ENTRADA',W-MR,10,{align:'right'});
-    doc.setFontSize(7.5); doc.setFont('helvetica','normal'); setC(GRAY);
-    doc.text(r.numero+'  •  emitida em '+fmtDT(new Date().toISOString()),W-MR,15.5,{align:'right'});
-  }
-  function footer(){
-    const pg=doc.internal.getCurrentPageInfo().pageNumber, tot=doc.internal.getNumberOfPages();
-    doc.setFontSize(6.5); doc.setFont('helvetica','italic'); setC([170,165,160]);
-    doc.text('Perpec Oilfield Supply  •  '+CONFIG.DOC_REF+'  •  Controle de Entrada de Veículos',W/2,H-7,{align:'center'});
-    doc.setFont('helvetica','normal');
-    doc.text('Página '+pg+' de '+tot,W-MR,H-7,{align:'right'});
-  }
-
-  header();
-  let y=26;
-
-  // ---- Texto de abertura ----
-  doc.setFontSize(9); doc.setFont('helvetica','normal'); setC(DARK);
-  const abertura='A Perpec Oilfield Supply declara, para os devidos fins, que a entrada da pessoa e do veículo '+
+  P.paragrafo('A Perpec Oilfield Supply declara, para os devidos fins, que a entrada da pessoa e do veículo '+
     'abaixo identificados nas dependências da unidade foi previamente autorizada pelo setor responsável, '+
-    'conforme registro de portaria nº '+r.numero+', e conferida pelo porteiro do turno indicado neste documento.';
-  const linhas=doc.splitTextToSize(abertura,CW);
-  doc.text(linhas,ML,y); y+=linhas.length*4.2+4;
-
-  // ---- Tabelas de dados ----
-  // Compactas de propósito: o corpo inteiro precisa caber na primeira
-  // página junto com as duas conferências assinadas.
-  function tabela(titulo,dados){
-    doc.autoTable({
-      startY:y, margin:{left:ML,right:MR,top:24,bottom:16},
-      head:[[{content:titulo,colSpan:2,styles:{halign:'left',fillColor:DARK,textColor:[240,230,228],fontSize:7.5,fontStyle:'bold'}}]],
-      body:dados.map(l=>[l[0],l[1]||'—']),
-      styles:{fontSize:8.5,cellPadding:1.7,lineColor:LGRAY,lineWidth:0.1,valign:'top',overflow:'linebreak'},
-      columnStyles:{0:{cellWidth:50,fontStyle:'bold',textColor:GRAY},1:{cellWidth:CW-50,textColor:DARK}},
-      didDrawPage:()=>{ footer(); }
-    });
-    y=doc.lastAutoTable.finalY+3;
-  }
+    'conforme registro de portaria nº '+r.numero+', e conferida pelo porteiro do turno indicado neste documento.');
 
   tabela('QUEM ENTROU E COM QUAL VEÍCULO',[
     ['Nome',      r.pessoa],
@@ -2717,133 +3693,24 @@ async function gerarDeclaracao(id){
   if(r.observacoes) tabela('ANOTAÇÕES DA PORTARIA',[['Observações', r.observacoes]]);
 
   // ---- Termos confirmados, com a assinatura desenhada ----
-  const ASSIN_L=46, ASSIN_A=14;            // tamanho da assinatura no papel
-
-  /* Altura exata do bloco, para decidir a quebra ANTES de desenhar.
-     Precisa acompanhar termoPDF() passo a passo. */
-  function alturaTermo(c){
-    if(!c) return 0;
-    const img=(DB.assinaturas||{})[c.assinId];
-    const tl=doc.splitTextToSize(c.termo,CW);
-    return 2 + 4.5 + tl.length*3.8 + 2 + (img ? ASSIN_A+4.5 : 6) + 3;
-  }
-
-  function termoPDF(titulo,c){
-    if(!c) return;
-    const img=(DB.assinaturas||{})[c.assinId];
-
-    doc.setFontSize(7.5); doc.setFont('helvetica','bold'); setC(RED);
-    doc.text(titulo,ML,y); y+=2;
-    setD(LGRAY); doc.setLineWidth(0.3); doc.line(ML,y,ML+CW,y); y+=4.5;
-
-    doc.setFontSize(8); doc.setFont('helvetica','italic'); setC(DARK);
-    const tl=doc.splitTextToSize(c.termo,CW);
-    doc.text(tl,ML,y); y+=tl.length*3.8+2;
-
-    const quem=c.nome+(c.matricula?'  —  matrícula '+c.matricula:'');
-    if(img){
-      try{ doc.addImage(img,'PNG',ML,y,ASSIN_L,ASSIN_A); }catch(e){}
-      setD([120,115,110]); doc.setLineWidth(0.3); doc.line(ML,y+ASSIN_A+0.8,ML+ASSIN_L,y+ASSIN_A+0.8);
-      doc.setFontSize(8); doc.setFont('helvetica','bold'); setC(DARK);
-      doc.text(quem,ML+ASSIN_L+4,y+9);
-      doc.setFontSize(7); doc.setFont('helvetica','normal'); setC(GRAY);
-      doc.text('Confirmado em '+fmtDT(c.ts),ML+ASSIN_L+4,y+13.2);
-      y+=ASSIN_A+4.5;
-    }else{
-      doc.setFontSize(8); doc.setFont('helvetica','normal'); setC(GRAY);
-      doc.text('Confirmado por '+quem+' em '+fmtDT(c.ts)+'.',ML,y); y+=6;
-    }
-    y+=3;
-  }
-
-  // As duas conferências são um par: quem lê compara uma com a outra.
-  // Ou cabem juntas onde estamos, ou vão juntas para a página seguinte —
-  // nunca uma em cada folha.
-  const termos=[['CONFERÊNCIA NA ENTRADA',r.confirmEntrada],
-                ['CONFERÊNCIA NA SAÍDA',  r.confirmSaida]].filter(t=>t[1]);
-  const alturaPar=termos.reduce((s,t)=>s+alturaTermo(t[1]),0);
-  if(termos.length && y+alturaPar > H-20){ doc.addPage(); header(); y=26; }
-  termos.forEach(t=>termoPDF(t[0],t[1]));
+  P.termos([['CONFERÊNCIA NA ENTRADA',r.confirmEntrada],
+            ['CONFERÊNCIA NA SAÍDA',  r.confirmSaida]]);
 
   // ---- Fotos anexadas ----
-  // Baixadas do Storage e embutidas: o PDF precisa ser um arquivo completo,
-  // que continue legível daqui a anos, sem depender de link nem de sessão.
   let fotos=[];
   try{ fotos=await PORTARIA.listarFotos(id); }catch(e){}
   if(fotos.length){
     showToast('Baixando '+fotos.length+' foto(s) para o PDF…');
-    /* Tamanho real da imagem. Sem isto, a foto é esticada até preencher a
-       caixa e a de celular em pé sai achatada. */
-    async function dimensoes(b64){
-      try{
-        const p=doc.getImageProperties(b64);
-        if(p && p.width && p.height) return {w:p.width,h:p.height};
-      }catch(e){}
-      return await new Promise(ok=>{
-        const im=new Image();
-        im.onload =()=>ok({w:im.naturalWidth||4, h:im.naturalHeight||3});
-        im.onerror=()=>ok({w:4,h:3});
-        im.src=b64;
-      });
-    }
-
-    // Baixa tudo antes de desenhar: a altura de cada linha depende das duas
-    // fotos que vão nela, então não dá para posicionar uma de cada vez.
-    const prontas=[];
-    for(const f of fotos){
-      const b64=await PORTARIA.baixarFoto(f.caminho);
-      if(!b64) continue;
-      const d=await dimensoes(b64);
-      prontas.push({f:f, b64:b64, w:d.w, h:d.h});
-    }
-
-    if(prontas.length){
-      // A caixa é o limite, não o formato: cada foto entra inteira nela,
-      // na proporção original.
-      const CAIXA_L=(CW-6)/2, CAIXA_A=74;
-      const escala=p=>{ const k=Math.min(CAIXA_L/p.w, CAIXA_A/p.h); return {l:p.w*k, a:p.h*k}; };
-
-      function tituloFotos(){
-        doc.setFontSize(8); doc.setFont('helvetica','bold'); setC(RED);
-        doc.text('FOTOS ANEXADAS',ML,y); y+=2;
-        setD(LGRAY); doc.setLineWidth(0.3); doc.line(ML,y,ML+CW,y); y+=5;
-      }
-
-      // Sem página nova forçada: as fotos seguem o documento. Só quebra se
-      // o título e a primeira linha realmente não couberem.
-      const primeira=Math.max(escala(prontas[0]).a, prontas[1]?escala(prontas[1]).a:0);
-      if(y+7+primeira+9 > H-18){ doc.addPage(); header(); y=26; }
-      tituloFotos();
-
-      for(let i=0;i<prontas.length;i+=2){
-        const par=prontas.slice(i,i+2).map(p=>{ const e=escala(p); return {f:p.f,b64:p.b64,l:e.l,a:e.a}; });
-        const alturaLinha=Math.max.apply(null,par.map(p=>p.a));
-
-        if(y+alturaLinha+9 > H-18){ doc.addPage(); header(); y=26; tituloFotos(); }
-
-        par.forEach((p,c)=>{
-          // Centralizada na coluna: foto em pé não fica encostada à esquerda.
-          const x0=ML+c*(CAIXA_L+6), x=x0+(CAIXA_L-p.l)/2;
-          try{ doc.addImage(p.b64,'JPEG',x,y,p.l,p.a); }catch(e){ return; }
-          setD(LGRAY); doc.setLineWidth(0.2); doc.rect(x,y,p.l,p.a);
-          doc.setFontSize(6.8); doc.setFont('helvetica','normal'); setC(GRAY);
-          doc.text((p.f.momento==='entrada'?'Entrada':'Saída')+' — foto '+(i+c+1)+
-                   (p.f.marcada?'  (com marcação do porteiro)':''), x0, y+alturaLinha+3.4);
-        });
-        y+=alturaLinha+9;
-      }
-    }
+    await P.fotos('FOTOS ANEXADAS', fotos.map((f,i)=>({
+      caminho:f.caminho,
+      legenda:(f.momento==='entrada'?'Entrada':'Saída')+' — foto '+(i+1)+
+              (f.marcada?'  (com marcação do porteiro)':'')
+    })));
   }
 
-  // ---- Selo de integridade ----
-  doc.setFontSize(6.5); doc.setFont('helvetica','italic'); setC(GRAY);
-  doc.text('Documento gerado eletronicamente pelo sistema de portaria. Selo de integridade do registro: '+
-           r.selo+(integro(r)?'':'  (CONFERÊNCIA FALHOU)'),ML,H-13);
-
-  const tot=doc.internal.getNumberOfPages();
-  for(let i=1;i<=tot;i++){ doc.setPage(i); header(); footer(); }
-
-  doc.save('Declaracao-Entrada-'+r.numero+'.pdf');
+  P.fechar('Documento gerado eletronicamente pelo sistema de portaria. Selo de integridade do registro: '+
+           r.selo+(integro(r)?'':'  (CONFERÊNCIA FALHOU)'),
+           'Declaracao-Entrada-'+r.numero+'.pdf');
 
   auditar(r,'PDF GERADO','Declaração de autorização de entrada.');
   // Não re-sela: gerar PDF não muda nenhum campo do registro. Re-selar
@@ -2851,6 +3718,92 @@ async function gerarDeclaracao(id){
   dbSalvar();
   if(MODAL_ID===id) verRegistro(id); else renderTudo();
   showToast('PDF gerado. Veja a pasta de downloads.','success');
+}
+
+/* ================================================================
+   12c. RELATÓRIO DA RONDA
+   ----------------------------------------------------------------
+   Cada observação vira um bloco com o local, a hora e a descrição,
+   seguido das fotos daquela observação — as imagens ficam junto do
+   texto que explica o que elas mostram, não numa pilha no fim.
+   ================================================================ */
+async function gerarRelatorioRonda(id){
+  const r=DB.rondas.find(x=>x.id===id); if(!r) return;
+  if(!window.jspdf||!window.jspdf.jsPDF){ showToast('Não consegui gerar o PDF (sem internet para carregar a ferramenta).','error'); return; }
+  if(r.provisorio && !confirm('Esta ronda ainda não subiu para o servidor e o número '+r.numero+
+                              ' é provisório.\n\nAo sincronizar ela vai receber o número definitivo, '+
+                              'e este PDF ficará desatualizado.\n\nGerar mesmo assim?')) return;
+
+  const obs=r.observacoes||[];
+  showToast('Montando o relatório…');
+
+  // As fotos vêm do servidor. Sem elas o relatório sai só com o texto.
+  let porObs={};
+  try{ porObs=await PORTARIA.listarFotosDaRonda(obs.map(o=>o.id)); }catch(e){ porObs={}; }
+
+  const P=criarPDF({
+    titulo:'RELATÓRIO DE RONDA',
+    ident:r.numero, refDoc:CONFIG.DOC_REF_RONDA, rodape:'Ronda da Portaria'
+  });
+
+  const dur = r.fim ? duracao(new Date(r.fim)-new Date(r.inicio)) : '—';
+  P.paragrafo('A Perpec Oilfield Supply registra, para os devidos fins, a ronda de inspeção nº '+r.numero+
+    ', realizada pelo porteiro identificado abaixo. As observações relacionadas neste documento são as '+
+    'situações fora do normal encontradas durante o percurso.');
+
+  P.tabela('IDENTIFICAÇÃO DA RONDA',[
+    ['Porteiro responsável', r.porteiro+(r.matricula?'  —  matrícula '+r.matricula:'')],
+    ['Turno',                r.turno],
+    ['Início da ronda',      fmtDT(r.inicio)],
+    ['Fim da ronda',         r.fim?fmtDT(r.fim):'ronda não finalizada'],
+    ['Duração',              dur],
+    ['Observações',          obs.length?String(obs.length)+' registrada(s)':'nenhuma ocorrência']
+  ]);
+
+  if(!obs.length){
+    P.tituloSecao('RESULTADO DA RONDA');
+    P.paragrafo('Nenhuma ocorrência registrada. O porteiro percorreu a unidade no horário indicado '+
+                'e não encontrou situação anormal que merecesse registro.',9);
+  }
+
+  for(let i=0;i<obs.length;i++){
+    const o=obs[i];
+    const fs=porObs[o.id]||[];
+
+    // Cabeçalho da observação e a descrição andam juntos: o título não
+    // pode ficar sozinho no pé de uma página.
+    const linhasDesc=P.doc.splitTextToSize(o.descricao,P.CW);
+    const alturaMin = 7 + 5 + linhasDesc.length*4.2 + 5;
+    if(P.y+alturaMin > P.H-18) P.novaPagina();
+
+    P.tituloSecao('OBSERVAÇÃO '+(i+1)+' DE '+obs.length);
+    P.doc.setFontSize(10); P.doc.setFont('helvetica','bold'); P.setC(P.DARK);
+    P.doc.text(o.local,P.ML,P.y);
+    P.doc.setFontSize(7.5); P.doc.setFont('helvetica','normal'); P.setC(P.GRAY);
+    P.doc.text('Registrada em '+fmtDT(o.ts),P.ML+P.CW,P.y,{align:'right'});
+    P.y+=5;
+
+    P.doc.setFontSize(9); P.doc.setFont('helvetica','normal'); P.setC(P.DARK);
+    P.doc.text(linhasDesc,P.ML,P.y); P.y+=linhasDesc.length*4.2+4;
+
+    if(fs.length){
+      await P.fotos(null, fs.map((f,k)=>({
+        caminho:f.caminho,
+        legenda:'Observação '+(i+1)+' — foto '+(k+1)+(f.marcada?'  (com marcação do porteiro)':'')
+      })));
+    }
+    P.y+=2;
+  }
+
+  // Assinatura de quem fez a ronda.
+  P.termos([['CONFERÊNCIA DA RONDA', r.confirm]]);
+
+  P.fechar('Documento gerado eletronicamente pelo sistema de portaria. Selo de integridade da ronda: '+
+           (r.selo||'—')+(rondaIntegra(r)?'':'  (CONFERÊNCIA FALHOU)'),
+           'Relatorio-Ronda-'+r.numero+'.pdf');
+
+  PORTARIA.auditarRonda(r.id,'RELATÓRIO GERADO','Relatório da ronda em PDF.');
+  showToast('Relatório gerado. Veja a pasta de downloads.','success');
 }
 
 /* ================================================================
@@ -3011,11 +3964,23 @@ async function depoisDoLogin(){
   renderUsuario();
   renderTurno();
   renderTudo();                       // mostra a cópia local na hora
+
+  // A primeira tela depois de entrar é a escolha do módulo. Quem recarregou
+  // a página no meio de um trabalho volta para onde estava.
+  let ultimo=null;
+  try{ ultimo=localStorage.getItem(CHAVE_MODULO); }catch(e){}
+  irModulo(ultimo);
+
   const pacote=await PORTARIA.puxarTudo();
   if(pacote){ aplicarDoServidor(pacote); }
   else showToast('Sem conexão. Mostrando a última cópia deste aparelho.','error');
   renderTurno(); renderTudo();
   await PORTARIA.descarregar();
+
+  // Ronda deixada aberta em outro aparelho ou em outro dia: avisa, porque o
+  // turno não fecha enquanto ela não for finalizada.
+  const ra=rondaAberta();
+  if(ra) showToast('Você tem a ronda '+ra.numero+' em andamento desde '+fmtDT(ra.inicio)+'.');
 
   PORTARIA.ligarSondagem(pacote=>{ aplicarDoServidor(pacote); renderTurno(); renderTudo(); });
 }
@@ -3035,13 +4000,24 @@ window.addEventListener('DOMContentLoaded',async ()=>{
   if(!document.getElementById('fEntrada').value) agoraNoCampo('fEntrada');
 
   CAMPOS_FORM.forEach(id=>document.getElementById(id).addEventListener('input',salvarRascunho));
+  // O pack de observação também é rascunhado: fechar o app no meio da ronda
+  // não pode perder o que já foi escrito.
+  ['obLocal','obDescricao'].forEach(id=>
+    document.getElementById(id).addEventListener('input',salvarPackRascunho));
   PORTARIA.aoMudar(info=>{ renderSync(info); });
   renderFotos('entrada');
+  renderFotos('ronda');
   irPasso(1);
 
   relogio(); setInterval(relogio,1000);
   // Mantém o semáforo de permanência atualizado sem recarregar a página.
-  setInterval(()=>{ renderContadores(); renderAbertos(); renderHistorico(); },60000);
+  setInterval(()=>{
+    renderContadores(); renderAbertos(); renderHistorico();
+    renderHub();
+    // Só redesenha a ronda fora do preenchimento: no meio de um pack isso
+    // apagaria o que o porteiro está digitando.
+    if(RONDA_TELA!=='pack') renderRonda();
+  },60000);
 
   // Esc fecha a camada mais alta primeiro, nunca a de baixo.
   document.addEventListener('keydown',ev=>{
