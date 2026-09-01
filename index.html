@@ -1328,11 +1328,21 @@ function aplicarDoServidor(pacote){
       if(meu){ DB.turno.porteiro=meu.nome; DB.turno.matricula=meu.matricula; }
     }
   }
+  /* O que ainda está na fila é mais novo do que o que o servidor devolve.
+     Sem esta trava, registrar uma saída e receber uma atualização antes de a
+     fila esvaziar fazia o carro voltar para "Estão dentro" na tela. */
+  const naFila = PORTARIA.idsNaFila ? PORTARIA.idsNaFila() : {registros:[],rondas:[]};
+  const pendReg={}, pendRnd={};
+  naFila.registros.forEach(id=>pendReg[id]=true);
+  naFila.rondas.forEach(id=>pendRnd[id]=true);
+
   if(pacote.registros){
     const porId={};
     if(!pacote.completo) DB.registros.forEach(r=>porId[r.id]=r);
-    else DB.registros.filter(r=>r.provisorio).forEach(r=>porId[r.id]=r);  // ainda não subiram
+    // Guarda os que ainda não subiram: os provisórios e os que têm gravação na fila.
+    else DB.registros.filter(r=>r.provisorio||pendReg[r.id]).forEach(r=>porId[r.id]=r);
     pacote.registros.forEach(x=>{
+      if(pendReg[x.id] && porId[x.id]) return;      // a cópia local é a mais nova
       const antigo=porId[x.id];
       // Não deixa a resposta do servidor apagar a auditoria já carregada.
       if(antigo && antigo.auditoria && !x.auditoria) x.auditoria=antigo.auditoria;
@@ -1343,8 +1353,9 @@ function aplicarDoServidor(pacote){
   if(pacote.rondas){
     const porId={};
     if(!pacote.completo) DB.rondas.forEach(r=>porId[r.id]=r);
-    else DB.rondas.filter(r=>r.provisorio).forEach(r=>porId[r.id]=r);   // ainda não subiram
+    else DB.rondas.filter(r=>r.provisorio||pendRnd[r.id]).forEach(r=>porId[r.id]=r);
     pacote.rondas.forEach(x=>{
+      if(pendRnd[x.id] && porId[x.id]) return;      // a cópia local é a mais nova
       const antiga=porId[x.id];
       // A lista de observações vem separada; não deixa a ronda voltar sem ela.
       if(antiga && antiga.observacoes && !x.observacoes) x.observacoes=antiga.observacoes;
@@ -3236,6 +3247,7 @@ function renderUsuario(){
   pp.className = 'user-papel'+(EU.papel==='gestor'?' gestor':'');
 }
 
+let ULTIMO_ERRO_SYNC='';
 function renderSync(info){
   const box=document.getElementById('syncBox');
   const txt=document.getElementById('syncTxt');
@@ -3245,8 +3257,14 @@ function renderSync(info){
   let cls='off', msg='Sem conexão';
   if(est==='ok' && !pend){ cls='ok';   msg='Tudo sincronizado'; }
   else if(est==='sincronizando'){ cls='sinc'; msg='Sincronizando…'; }
-  else if(est==='erro'){ cls='erro'; msg=(info&&info.erro)||'Erro de sincronização'; }
+  else if(est==='erro'){
+    cls='erro'; msg=(info&&info.erro)||'Erro de sincronização';
+    // Gravação recusada faz o registro voltar ao que está no servidor. Uma
+    // faixa pequena no cabeçalho não é aviso suficiente para isso.
+    if(msg!==ULTIMO_ERRO_SYNC){ ULTIMO_ERRO_SYNC=msg; showToast(msg,'error'); }
+  }
   else if(pend){ cls='off'; msg=pend+' esperando envio'; }
+  if(est!=='erro') ULTIMO_ERRO_SYNC='';
   box.className='sync '+cls;
   txt.textContent=msg;
 }

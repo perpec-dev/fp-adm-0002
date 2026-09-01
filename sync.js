@@ -105,6 +105,22 @@ window.PORTARIA = (function(){
     gravarFila(f); avisar();
   }
 
+  /* Quem ainda tem gravação esperando na fila.
+     A tela usa isto para NÃO deixar a resposta do servidor sobrescrever esses
+     registros: o que está no aparelho é mais novo do que o que está lá. Sem
+     isso, registrar uma saída sem internet (ou logo antes de uma atualização)
+     fazia o carro "voltar" para Estão dentro até a fila esvaziar. */
+  function idsNaFila(){
+    const regs=Object.create(null), rnds=Object.create(null);
+    fila().forEach(i=>{
+      const p=i.payload||{};
+      if(i.tipo==='reg_insert'||i.tipo==='reg_update'||i.tipo==='reg_delete') regs[p.id]=true;
+      else if(i.tipo==='ronda_insert'||i.tipo==='ronda_update') rnds[p.id]=true;
+      else if(i.tipo==='obs_insert') rnds[p.rondaId]=true;
+    });
+    return { registros:Object.keys(regs), rondas:Object.keys(rnds) };
+  }
+
   /* ---------------- tradução entre a tela e o banco ---------------- */
   // A tela usa camelCase; o banco usa snake_case.
   function paraBanco(r){
@@ -143,6 +159,21 @@ window.PORTARIA = (function(){
     'setor,autorizador,porteiro_entrada,matricula_entrada,turno_entrada,porteiro_saida,matricula_saida,'+
     'turno_saida,observacoes,confirm_entrada,confirm_saida,selo,criado_em,atualizado_em';
 
+  /* Colunas que o banco aceita ALTERAR num registro já criado.
+     Quem liberou a entrada, quando e sob qual confirmação não muda depois:
+     porteiro_entrada, matricula_entrada, turno_entrada e confirm_entrada não
+     têm GRANT de UPDATE, de propósito.
+
+     Isso não é detalhe: o Postgres recusa o UPDATE INTEIRO se UMA coluna sem
+     permissão for citada, mesmo que o valor enviado seja igual ao que já está
+     lá. O erro que volta é "permission denied for table registros" (42501) —
+     genérico, sem dizer qual coluna. Por isso o envio monta o corpo a partir
+     desta lista em vez de mandar o registro inteiro. */
+  const COLUNAS_UPDATE = ['status','pessoa','documento','empresa','placa','veiculo',
+                          'entrada','saida','setor','autorizador',
+                          'porteiro_saida','matricula_saida','turno_saida',
+                          'observacoes','confirm_saida','selo'];
+
   /* ---------------- ronda: tela <-> banco ---------------- */
   function paraBancoRonda(r){
     return {
@@ -173,6 +204,9 @@ window.PORTARIA = (function(){
   const COLUNAS_RONDA='id,numero,provisorio,status,inicio,fim,porteiro,matricula,turno,'+
                       'confirm,selo,criado_em,atualizado_em';
   const COLUNAS_OBS  ='id,ronda_id,ordem,local,descricao,ts,criado_em';
+  // Ver o comentário de COLUNAS_UPDATE: citar coluna sem GRANT derruba o
+  // UPDATE inteiro, então a lista é do que pode mudar.
+  const COLUNAS_UPDATE_RONDA = ['status','fim','turno','confirm','selo'];
 
   function perfilDoBanco(p){
     return { id:p.id, matricula:p.matricula, nome:p.nome, papel:p.papel,
@@ -521,8 +555,12 @@ window.PORTARIA = (function(){
           const permanente = e && e.code && !/fetch|network|Failed/i.test(e.message||'');
           if(permanente){
             // Ex.: violação de regra de acesso. Reenviar não adianta.
+            // O item sai da fila, e o que estava na tela volta a ser o que o
+            // servidor tem. Precisa ficar claro O QUE não foi gravado, senão
+            // o registro só "some" e ninguém entende.
             remover=true;
-            setEstado('erro','Uma gravação foi recusada pelo servidor: '+(e.message||e.code));
+            setEstado('erro', descreverFalha(item)+' não foi gravado no servidor: '+
+                              (e.message||e.code));
           }else{
             setEstado('offline','Sem conexão — '+f.length+' na fila');
             break;
@@ -539,6 +577,25 @@ window.PORTARIA = (function(){
       enviando=false; avisar();
     }
     return { enviados, pendentes:fila().length, mudouNumero };
+  }
+
+  /* Nome em português do que a fila estava tentando gravar, para a mensagem
+     de erro dizer algo além de "reg_update". */
+  function descreverFalha(item){
+    const p=item.payload||{};
+    switch(item.tipo){
+      case 'reg_insert':      return 'A entrada '+(p.numero||'');
+      case 'reg_update':      return 'A alteração do registro '+(p.numero||'');
+      case 'reg_delete':      return 'A exclusão do registro';
+      case 'ronda_insert':    return 'A ronda '+(p.numero||'');
+      case 'ronda_update':    return 'A alteração da ronda '+(p.numero||'');
+      case 'obs_insert':      return 'A observação de ronda "'+(p.local||'')+'"';
+      case 'foto_upload':
+      case 'foto_obs_upload': return 'Uma foto';
+      case 'aud_insert':      return 'Um evento do histórico';
+      case 'perfil_update':   return 'A alteração do cadastro';
+      default:                return 'Uma gravação';
+    }
   }
 
   async function executar(item, mudouNumero){
@@ -558,13 +615,13 @@ window.PORTARIA = (function(){
       if(error) throw error;
     }
     else if(item.tipo==='reg_update'){
-      const b=paraBanco(item.payload);
-      const id=b.id;
-      delete b.id;
-      // A numeração é do servidor: um update nunca a altera. Se o registro
-      // ainda era provisório quando a edição foi feita, quem corrige o
-      // número é o insert que veio antes na fila.
-      delete b.numero; delete b.provisorio;
+      const todo=paraBanco(item.payload);
+      const id=todo.id;
+      // Só o que o banco deixa alterar. A numeração é do servidor: um update
+      // nunca a altera — se o registro ainda era provisório quando a edição
+      // foi feita, quem corrige o número é o insert que veio antes na fila.
+      const b={};
+      COLUNAS_UPDATE.forEach(k=>{ if(k in todo) b[k]=todo[k]; });
       // documento nulo = "não mexer", não "apagar".
       if(b.documento===null) delete b.documento;
       const { error } = await sb.from('registros').update(b).eq('id', id);
@@ -588,12 +645,13 @@ window.PORTARIA = (function(){
       if(error) throw error;
     }
     else if(item.tipo==='ronda_update'){
-      const b=paraBancoRonda(item.payload);
-      const id=b.id;
-      // Numeração é do servidor; início e matrícula não mudam depois de
-      // aberta (o banco nem concede permissão para essas colunas).
-      delete b.id; delete b.numero; delete b.provisorio;
-      delete b.inicio; delete b.porteiro; delete b.matricula;
+      const todo=paraBancoRonda(item.payload);
+      const id=todo.id;
+      // Mesma regra dos registros: lista do que PODE mudar, não lista do que
+      // não pode. Início, porteiro e matrícula não mudam depois de a ronda ser
+      // aberta, e o banco não dá permissão nessas colunas.
+      const b={};
+      COLUNAS_UPDATE_RONDA.forEach(k=>{ if(k in todo) b[k]=todo[k]; });
       const { error } = await sb.from('rondas').update(b).eq('id', id);
       if(error) throw error;
     }
@@ -749,7 +807,7 @@ window.PORTARIA = (function(){
     criarRonda, atualizarRonda, criarObservacao, auditarRonda,
     anexarFoto, listarFotos, baixarFoto, apagarFoto, fotosPendentes,
     anexarFotoObs, listarFotosDaRonda, fotosRondaPendentes,
-    descarregar, numeroNovo, numeroNovoRonda,
+    descarregar, numeroNovo, numeroNovoRonda, idsNaFila,
     criarPorteiro, salvarPerfil, apagarPerfil,
     revelarDocumento, anonimizarAntigos,
     ligarSondagem, desligarSondagem,
